@@ -50,9 +50,6 @@ img{
 .imgBtn:hover{
     transform: scale(1.2);
 }
-.hidden{
-    display: none;
-}
 
 
 /***    TOP SECTION    -   LOAD FILE, QUESTION SECTION, RECORD AUDIO  ***/
@@ -164,10 +161,11 @@ h3 {
     color: black;
     opacity: 100%;
 }
-.inactive{
-    opacity: 40%;
+#mouth h3{
+    position: relative;
+    z-index: 5;
+    text-shadow: 0px 0px 10px rgba(50, 125, 255, 0.5), 0px 0px 20px rgba(50, 125, 255, 0.85);
 }
-
 #mouthPic, #bodyPic{
     width: fit-content;
     margin: 0 auto;
@@ -175,6 +173,20 @@ h3 {
 #headBodyChoice{
     cursor: pointer;
 }
+#headControlTitle{
+    position: relative;
+    z-index: 5;
+    /* Head control initializes on. */
+    text-shadow: 0px 0px 10px rgba(200, 25, 25, 0.5), 0px 0px 20px rgba(200, 25, 25, 0.85);
+}
+#tailControlTitle{
+    position: relative;
+    z-index: 5;
+    /* text-shadow: 0px 0px 10px rgba(25, 200, 25, 0.5), 0px 0px 20px rgba(25, 200, 25, 0.85); */
+}
+
+
+/***    BOTTOM SECTION    -   AUDIOWAVE EDITING  ***/
 #mouthControl {
     display: inline-block;
     width: 100%;
@@ -187,6 +199,12 @@ h3 {
 /* For Chrome, Safari, Opera, and other WebKit-based browsers */
 #mouthControl ::part(scroll)::-webkit-scrollbar {
   display: none;
+}
+
+#bodyControl {
+    display: inline-block;
+    width: 100%;
+    border: 1px solid black;
 }
 /*       ScrollBar 1        */
 #bodyControl ::part(scroll)::-webkit-scrollbar {
@@ -205,8 +223,12 @@ h3 {
 }
 
 
-#bodyControl {
-    display: inline-block;
-    width: 100%;
-    border: 1px solid black;
+
+/***        --- OVERRIDES  ---      ***/
+.inactive{
+    opacity: 40%;
+    text-shadow: none;
+}
+.hidden{
+    display: none;
 }

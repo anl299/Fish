@@ -3,8 +3,6 @@ import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js
 import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'
 import Timeline from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.esm.js'
 import Record from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/record.esm.js'
-// import Multitrack from 'https://unpkg.com/wavesurfer-multitrack/dist/multitrack.esm.js'
-// import Multitrack from 'https://cdn.jsdelivr.net/npm/wavesurfer-multitrack/dist/multitrack.esm.js'
 
 
 /////         Store UI Elements         /////
@@ -202,7 +200,7 @@ function initializeWaveSurfers(){
     minLength: minMouthTime,
   })
   regions_body.enableDragSelection({
-    color: 'rgb(225, 225, 50)', // bodyDrawColor,
+    color: 'rgba(225, 225, 50, 0.25)', // bodyDrawColor,
     minLength: minBodyTime,
   })
 
@@ -322,21 +320,23 @@ function loadAudioBlob(blob){
 function swapBodyMode(){
   if (bodyMode == "head"){ // Change to TAIL
     bodyMode = "tail"
-    // regions_body.setOptions({ color: 'rgba(50,255,50,0.25)' });
     bodyDrawColor = 'rgba(255,50,50,0.25)'
     headPic.classList.add("hidden")
     tailPic.classList.remove("hidden")
     headControlTitle.classList.add("inactive")
+    headControlTitle.style.textShadow = "none"
     tailControlTitle.classList.remove("inactive")
+    tailControlTitle.style.textShadow = "0px 0px 10px rgba(200, 25, 25, 0.5), 0px 0px 20px rgba(200, 25, 25, 0.85)"
 
   } else{       //  Change to HEAD
     bodyMode = "head"
-    // regions_body.setOptions({ color: 'rgba(255,50,50,0.25)' });
     bodyDrawColor = 'rgba(50,255,50,0.25)'
     headPic.classList.remove("hidden")
     tailPic.classList.add("hidden")
     headControlTitle.classList.remove("inactive")
+    tailControlTitle.style.textShadow = "none"
     tailControlTitle.classList.add("inactive")
+    headControlTitle.style.textShadow = "0px 0px 10px rgba(25, 200, 25, 0.5), 0px 0px 20px rgba(25, 200, 25, 0.85)"
   }
 }
 
