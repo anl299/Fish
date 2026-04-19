@@ -42,13 +42,14 @@ const minHeadTime = 1.5 // seconds
 const minTailTime = 0.5 // seconds
 
 
-let audioWave_full = null
-let audioWave_mouth = null
+let audioWave_full = null   // Full audio Waveform - Greyed out
+let audioWave_mouth = null  // Waveform in Mouth area
+let audioWave_body = null   // Waveform in Body area
 let regions_mouth = null
-let audioWave_body = null
 let regions_body = null
 let recordPlugin = null
 // let audioFile = null
+let audioBlob = null
 let editMode = "draw" //  "draw" <--> "erase"
 let bodyMode = "head" //  "head" <--> "tail"
 let bodyDrawColor = 'rgba(50,255,50,0.25)' // () => (bodyMode == "head") ? 'rgba(50,255,50,0.25)' : 'rgba(255,50,50,0.25)'
@@ -103,8 +104,14 @@ function initializeWaveSurfers(){
   })
 
   // 2) create two independent Regions plugin instances — one per editable view
-  regions_mouth = RegionsPlugin.create()
-  regions_body = RegionsPlugin.create()
+  regions_mouth = RegionsPlugin.create({
+    drag: true,
+    resize: true
+  })
+  regions_body = RegionsPlugin.create({
+    drag: true,
+    resize: true
+  })
 
   // 3) Create the mouth and body players, *sharing the same media element* as the master.
   //    This is the trick that keeps play/pause/seek in sync automatically.
@@ -213,52 +220,49 @@ function initializeWaveSurfers(){
 
   // React to region events (create / update / remove)
   regions_mouth.on('region-created', (region) => {
-    region.setOptions({
-      drag: true,
-      resize: true
-    })
-
     const regions = Object.values(regions_mouth.getRegions())
-    if (overlaps(region, regions)) {
-      region.remove()
-    }
+    enforceMinLength(region, minMouthTime)
+    checkOverlaps(region, regions)
 
+    region.motor = "mouth"
     // Add downward slope //
   })
 
   regions_body.on('region-created', (region) => {
-    region.setOptions({
-      drag: true,
-      resize: true
-    })
-
     region.setOptions({ color: bodyDrawColor });
     const regions = Object.values(regions_body.getRegions())
-    if (overlaps(region, regions)) {
-      region.remove()
-    }
+    // console.log(overlaps(region, regions)) // Prints nothing?
+    enforceMinLength(region, minBodyTime)
+    checkOverlaps(region, regions)
 
+    region.motor = bodyMode
     // Add downward slope //
   })
-
   //  ******
-  // regions_mouth.on('region-update-end', (region) => {
-  //   const regions = Object.values(regions_mouth.getRegions())
-  //   for (const other of regions) {
-  //     if (other === region) continue
-  //     if (region.start < other.end && region.end > other.start) {
-  //         region.setOptions({
-  //             start: other.end
-  //         })
-  //     }
-  //   }
-  // })
-  function overlaps(region, regions) {
-    return regions.some(r =>
-      r !== region &&
-      region.start < r.end &&
-      region.end > r.start
-    )
+
+  function enforceMinLength(region, minLength) {
+    if ((region.end - region.start) < minLength) {
+      region.setOptions({
+        end: region.start + minLength
+      })
+    }
+  }
+  function checkOverlaps(region, regions) {
+    let closestOverlapStart = Infinity
+
+    for (const r of regions) {
+      if (r === region) continue
+
+      if (region.start < r.end && region.end > r.start) {
+        closestOverlapStart = Math.min(closestOverlapStart, r.start)
+      }
+    }
+
+    if (closestOverlapStart !== Infinity) {
+      region.setOptions({
+        end: closestOverlapStart
+      })
+    }
   }
   //  ******
 
@@ -304,15 +308,7 @@ function initializeWaveSurfers(){
 
 function loadAudioBlob(blob){
   audioWave_full.loadBlob(blob)
-
-  //***     Load audio into main player ONLY. Other players use same processed data     ***//
-  // if (audioWave_mouth){
-  //   audioWave_mouth.loadBlob(blob)
-  // }
-  // if (audioWave_body){
-  //   audioWave_body.loadBlob(blob)
-  // }
-  //  ******
+  audioBlob = blob  //  ***
 }
 
 
@@ -354,3 +350,118 @@ function setEditMode(source){
   }
 }
 
+
+/////               SEND DATA TO FISH              /////
+sendBtn.addEventListener("click", async () => { // send via bluetooth
+  const audioBuffer = await getAudioBuffer(audioBlob);
+  const allEvents = compileEvents() // Stores all motor movement data in array
+  const packet = buildPacket(allEvents, audioBuffer);
+
+  const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: ['your-service-uuid'] }]
+  });
+
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService('B160BA55-AAAA-0117-3650-005006019920');
+  const characteristic = await service.getCharacteristic('0ABC1230-0021-0021-0021-333444455555');
+
+  await sendBinary(packet, characteristic);
+})
+function compileEvents(){
+  const events = []
+  regions_mouth.regions.forEach(region => {
+    events.push({
+      t: Math.round(region.start * 1000), // Convert time to integer in milliseconds
+      motor: region.motor,
+      state: 1,
+      pwm: 50     // 0-100
+    })
+    events.push({
+      t: Math.round(region.end * 1000), // Convert time to integer in milliseconds
+      motor: region.motor,
+      state: 0,
+      pwm: 0      // 0-100
+    })
+  })
+  regions_body.regions.forEach(region => {
+    events.push({
+      t: Math.round(region.start * 1000), // Convert time to integer in milliseconds
+      motor: region.motor,
+      state: 1,
+      pwm: 50     // 0-100
+    })
+    events.push({
+      t: Math.round(region.end * 1000), // Convert time to integer in milliseconds
+      motor: region.motor,
+      state: 0,
+      pwm: 0      // 0-100
+    })
+  })
+
+  events.sort((a,b) => a.t - b.t)
+  return events
+}
+
+const MOTOR_MAP = {
+    mouth: 0,
+    head: 1,
+    tail: 2
+};
+function buildPacket(events, audioArrayBuffer) {
+    const numEvents = events.length;
+    const audioSize = audioArrayBuffer.byteLength;
+
+    const headerSize = 2 + 4; // uint16 + uint32
+    const eventSize = 7;      // per event
+
+    const totalSize = headerSize + (numEvents * eventSize) + audioSize;
+
+    const buffer = new ArrayBuffer(totalSize);
+    const view = new DataView(buffer);
+
+    let offset = 0;
+
+    // HEADER
+    view.setUint16(offset, numEvents, true); offset += 2;
+    view.setUint32(offset, audioSize, true); offset += 4;
+
+    // EVENTS
+    events.forEach(e => {
+        view.setUint32(offset, e.t, true); offset += 4;
+        view.setUint8(offset, MOTOR_MAP[e.motor]); offset += 1;
+        view.setUint8(offset, e.state); offset += 1;
+        view.setUint8(offset, e.pwm); offset += 1;
+    });
+
+    // AUDIO
+    const audioBytes = new Uint8Array(audioArrayBuffer);
+    new Uint8Array(buffer, offset).set(audioBytes);
+
+    return buffer;
+}
+
+async function getAudioBuffer(file) {
+    return await file.arrayBuffer();
+}
+// Each chunk: [type:1][seq:2][total:2][payload:N]
+function buildChunk(type, seqNum, totalChunks, payload) {
+    const buffer = new ArrayBuffer(5 + payload.length);
+    const view = new DataView(buffer);
+    view.setUint8(0, type);        // 0=motor, 1=audio
+    view.setUint16(1, seqNum, true);
+    view.setUint16(3, totalChunks, true);
+    new Uint8Array(buffer, 5).set(payload);
+    return buffer;
+}
+async function sendBinary(packet, characteristic) {
+  const bytes = new Uint8Array(packet);
+  const chunkSize = 195; // 200 minus 5 bytes for the chunk header
+  const totalChunks = Math.ceil(bytes.length / chunkSize);
+
+  for (let i = 0; i < totalChunks; i++) {
+      const slice = bytes.slice(i * chunkSize, (i + 1) * chunkSize);
+      const chunk = buildChunk(0, i, totalChunks, slice);
+      await characteristic.writeValue(chunk);
+      await new Promise(r => setTimeout(r, 15));
+  }
+}
