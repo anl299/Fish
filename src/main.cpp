@@ -1,3 +1,22 @@
+// ???????????????????????????????????????????????????? //
+
+// Why store audio on SD and motor events in RAM?
+//      Can they both be in SD? 
+//      Can they both be 'chunked' into RAM and played from there? 
+
+//  Need to ENFORCE Audio from webpage is:
+//            16-bit PCM  <-- ?
+//            44.1kHz   <-- Maybe change later?
+//            mono
+
+//////      IMPORTANT CHANGE      //////
+//    live playback in sinkCallback()  DISABLED
+//    Can ONLY be used later if I want fallback
+
+
+
+// ???????????????????????????????????????????????????? //
+
 // Billy Bass Sat Nav / "BLE Bass" control code
 // by Ian Renton, 2024. CC Zero / Public Domain
 // Based on examples from https://github.com/tierneytim/btAudio & https://github.com/kosme/arduinoFFT
@@ -68,12 +87,33 @@
 #define HEADTAIL_MOTOR_PWM_DUTY_CYCLE 255 // Proxy for motor speed, up to 2^resolution
 #define MOUTH_MOTOR_PWM_DUTY_CYCLE 255    // Proxy for motor speed, up to 2^resolution
 
+//////////////////////////////////////////////////
+static uint32_t startTime = 0;
+
+volatile bool useBLE = false;
+uint32_t lastBLEtime = 0;
+#define BLE_TIMEOUT_MS 2000
+volatile bool packetReady = false;
+volatile bool playbackStarted = false;
+
+// Motor event struct
+struct MotorEvent {
+    uint32_t t;
+    uint8_t  motor;
+    uint8_t  state;
+    uint8_t  pwm;
+};
+//////////////////////////////////////////////////
+
 // Function defs
 void setup();
 void loop();
 void sinkCallback(const uint8_t *data, uint32_t len);
 void calcFFT(void *pvParameters);
+void pushEvent(MotorEvent e);
+bool popEvent(MotorEvent &e);
 void headOut();
+void tailOut();
 void headTailRest();
 void flapMouth();
 void mouthOpen();
@@ -91,38 +131,112 @@ SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 
 // Create Bluetooth audio receiver
 btAudio audio = btAudio(DEVICE_NAME);
-// Called whenever a BLE client writes to the characteristic
+
+//////////////////////////////////////////////////
+// Max buffer: tune this to your expected max packet size
+static uint8_t  reassemblyBuf[32768];
+static uint16_t expectedChunks = 0;
+static uint16_t receivedChunks = 0;
+static size_t   reassemblyLen  = 0;
+//////////////////////////////////////////////////
+// Called once a complete packet has been reassembled
+void handleCompletePacket(uint8_t* data, size_t len) {
+  if (len < 6) return;
+
+  useBLE = true;
+  lastBLEtime = millis();
+
+  // Parse header
+  uint16_t numEvents = data[0] | (data[1] << 8);
+  uint32_t audioSize = data[2] | (data[3] << 8) | (data[4] << 16) | (data[5] << 24);
+
+  // Parse events
+  int offset = 6;
+  for (int i = 0; i < numEvents; i++) {
+    if (offset + 7 > len) break;
+    MotorEvent e;
+    e.t     = data[offset]   | (data[offset+1] << 8)
+            | (data[offset+2] << 16) | (data[offset+3] << 24);
+    e.motor = data[offset+4];
+    e.state = data[offset+5];
+    e.pwm   = data[offset+6];
+    offset += 7;
+
+    // Serial.printf("EVENT t=%u motor=%u state=%u pwm=%u\n",
+    //               e.t, e.motor, e.state, e.pwm);
+    packetReady = true;
+    pushEvent(e);
+  }
+
+  // Audio data starts here
+  // audioSize and offset are now valid for handing off to btAudio
+  (void)audioSize; // remove this line when you wire up audio handoff
+}
+//////////////////////////////////////////////////
+// --- Event queue ---
+#define MAX_EVENTS 64
+MotorEvent eventQueue[MAX_EVENTS];
+volatile int queueHead = 0;
+volatile int queueTail = 0;
+
+void pushEvent(MotorEvent e) {
+    int next = (queueTail + 1) % MAX_EVENTS;
+    if (next == queueHead) {
+        Serial.println("WARNING: event queue full");
+        return;
+    }
+    eventQueue[queueTail] = e;
+    queueTail = next;
+} /// *** ?????? "queueHead" & "queueTail" ?????? ***
+
+bool popEvent(MotorEvent &e) {
+    if (queueHead == queueTail) return false; // empty
+    e = eventQueue[queueHead];
+    queueHead = (queueHead + 1) % MAX_EVENTS;
+    return true;
+}
+//////////////////////////////////////////////////
+// Called whenever a BLE client writes to the characteristic  //////////////
 class MotorCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
     std::string value = pCharacteristic->getValue();
     uint8_t* data = (uint8_t*)value.data();
     size_t len = value.length();
 
-    if (len < 6) return; // too small to be a valid packet
+    if (len < 5) return; // 5 = chunk header size
 
-    // Parse header
-    uint16_t numEvents = data[0] | (data[1] << 8);
-    uint32_t audioSize = data[2] | (data[3] << 8) | (data[4] << 16) | (data[5] << 24);
-    (void) audioSize; // ****** used after chunk reassembly is implemented
-    
-    // Parse events (each is 7 bytes: 4t + 1motor + 1state + 1pwm)
-    int offset = 6;
-    for (int i = 0; i < numEvents; i++) {
-      if (offset + 7 > len) break;
+    // unpack the chunk header
+    uint8_t  type        = data[0];
+    uint16_t seqNum      = data[1] | (data[2] << 8);
+    uint16_t totalChunks = data[3] | (data[4] << 8);
+    uint8_t* payload     = data + 5;
+    size_t   payloadLen  = len - 5;
 
-      uint32_t t     = data[offset]     | (data[offset+1] << 8)
-                      | (data[offset+2] << 16) | (data[offset+3] << 24);
-      uint8_t motor  = data[offset + 4];
-      uint8_t state  = data[offset + 5];
-      uint8_t pwm    = data[offset + 6];
-      offset += 7;
+    if (seqNum == 0) {
+        expectedChunks = totalChunks;
+        receivedChunks = 0;
+        reassemblyLen  = 0;
+    }
 
-      // TODO: queue or handle motor event here
-      Serial.printf("t=%u motor=%u state=%u pwm=%u\n", t, motor, state, pwm);
+    if (reassemblyLen + payloadLen > sizeof(reassemblyBuf)) {
+        Serial.println("ERROR: reassembly buffer overflow");
+        return;
+    }
+
+    memcpy(reassemblyBuf + (seqNum * 195), payload, payloadLen);
+    reassemblyLen += payloadLen;
+    receivedChunks++;
+    expectedChunks = totalChunks; // update every chunk
+
+    if (receivedChunks == expectedChunks) {
+      Serial.println("Packet complete — parsing...");
+      handleCompletePacket(reassemblyBuf, reassemblyLen);
     }
   }
 };
+//////////////////////////////////////////////////
 
+//////      FOR DEBUGGING     //////
 void blinkLED(int times, int delayMs) {
   for (int i = 0; i < times; i++) {
     digitalWrite(LED_PIN, HIGH);
@@ -132,10 +246,10 @@ void blinkLED(int times, int delayMs) {
   }
   delay(500); // Gap between blink groups
 }
+////////////////////////////////////
 
 // Setup and run the program
-void setup()
-{
+void setup(){
   // Set up serial
   Serial.begin(SERIAL_BAUD);
   Serial.println("=== Boot start ==="); // ******
@@ -165,6 +279,7 @@ void setup()
   // Advertise Bluetooth device
   audio.begin();
   Serial.println("audio.begin() done"); // ******
+  //////////////////////////////////////////////////
   // Start BLE for motor data
   BLEDevice::init(DEVICE_NAME);
   BLEServer *pServer = BLEDevice::createServer();
@@ -176,9 +291,11 @@ void setup()
   pCharacteristic->setCallbacks(new MotorCallback());
   pService->start();
   BLEDevice::startAdvertising();
+  startTime = millis(); // Initialize with correct time reference
+  //////////////////////////////////////////////////
   Serial.println("audio.begin() done"); // ******
   blinkLED(2, 200); // ****** 2 blinks = audio.begin() completed
-
+  
   // Try to automatically reconnect to previously connected Bluetooth device if possible
   audio.reconnect();
   Serial.println("audio.reconnect() done"); // ******
@@ -205,11 +322,51 @@ void setup()
 // Main program loop. Runs on core 1, calculates the FFT of the latest audio sample and
 // moves the fish motors accordingly.
 void loop(){
- 
   //  ****** CHECK IF CUSTOM THING FROM WEBPAGE ****** //
-  //  ****** CHECK IF CUSTOM THING FROM WEBPAGE ****** //
-  //  ****** CHECK IF CUSTOM THING FROM WEBPAGE ****** //
+  if (packetReady && !playbackStarted) {
+    startTime = millis();   // 🔥 sync anchor
+    playbackStarted = true;
+    useBLE = true;
 
+    Serial.println("Playback started!");
+  }
+
+  MotorEvent e;
+  uint32_t now = millis() - startTime;
+
+  if (useBLE){
+    while (popEvent(e)) {
+      if (now >= e.t) {
+        // act on the event immediately
+        // Serial.printf("FIRE motor=%u state=%u pwm=%u\n",
+        //               e.motor, e.state, e.pwm);
+  
+        if (e.motor == 0){    // Mouth
+          (e.state == 1) ? mouthOpen() : mouthRest();
+        } else if (e.motor == 1){ // Head
+          (e.state == 1) ? headOut() : headTailRest();
+        } else if (e.motor == 2){ // Tail
+          (e.state == 1) ? tailOut() : headTailRest();
+        }
+
+      } else {
+        // not time yet — put it back (or use a smarter structure)
+        pushEvent(e);
+        break;
+      }
+    }
+
+    // Exit BLE mode if no events left AND timeout passed
+    if (queueHead == queueTail && (millis() - lastBLEtime > BLE_TIMEOUT_MS)) {
+      useBLE = false;
+    }
+
+    delay(5);
+    return; // Skips the FFT stuff
+  }
+  
+  
+  //////      GIT REPO CODE --> USES FFT     //////
   // Copy data out of the inter-process audio transfer buffer into the "real" data buffer
   // that will be used for the FFT. This is controlled with a mutex lock to ensure we
   // don't read from it and write to it at the same time.
@@ -299,14 +456,18 @@ void sinkCallback(const uint8_t *data, uint32_t len)
 }
 
 // Bring the fish's head out
-void headOut()
-{
+void headOut(){
   digitalWrite(HEADTAIL_MOTOR_PIN_1, LOW);
   digitalWrite(HEADTAIL_MOTOR_PIN_2, HIGH);
 }
 
+void tailOut(){ // *** ??? HOW DO I SWITCH SIGNAL FROM HEAD TO TAIL??? ***
+  digitalWrite(HEADTAIL_MOTOR_PIN_1, HIGH);
+  digitalWrite(HEADTAIL_MOTOR_PIN_2, LOW);
+}
+
 // Put the fish head and tail back to the neutral position
-void headTailRest()
+void headTailRest() //    ***     NECESSARY???      ***
 {
   digitalWrite(HEADTAIL_MOTOR_PIN_1, LOW);
   digitalWrite(HEADTAIL_MOTOR_PIN_2, LOW);
