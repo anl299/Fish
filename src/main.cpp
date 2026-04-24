@@ -9,10 +9,17 @@
 //            44.1kHz   <-- Maybe change later?
 //            mono
 
+//  WTFuck is "queueHead" & "queueTail" ???
+//  Used in push/pop functions & to detect when everything is done
+
+//  "uint8_t type = data[0]" is unused in MotorCallback()
+//        Do I need it?
+
+
+
 //////      IMPORTANT CHANGE      //////
 //    live playback in sinkCallback()  DISABLED
 //    Can ONLY be used later if I want fallback
-
 
 
 // ???????????????????????????????????????????????????? //
@@ -22,22 +29,25 @@
 // Based on examples from https://github.com/tierneytim/btAudio & https://github.com/kosme/arduinoFFT
 // Libraries used with many thanks.
 
-// Includes
+//      INCLUDES      //
+// Basic setup
 #include <Arduino.h>
 #include <arduinoFFT.h>
-// Setup Bluetooth stuff
-#include <btAudio.h>    // For receiving AUDIO only
-
-#include <BLEDevice.h>  // For receiving motor data
+// Setup Bluetooth stuff for receiving AUDIO only
+#include <btAudio.h>
+// Setup BLE stuff for receiving motor data
+#include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLECharacteristic.h>
+//  Stuff for MicroSD card reader
+#include <SPI.h>
+#include <SD.h>
 
 // Bluetooth device name
 #define DEVICE_NAME "Billy Bass"
 #define SERVICE_UUID "B160BA55-AAAA-0117-3650-005006019920"
 #define CHARACTERISTIC_UUID "0ABC1230-0021-0021-0021-333444455555"
-
 
 // Timing
 #define MOUTH_FLAP_INTERVAL_MILLIS 100 // Rate of mouth movement. Lower number = faster
@@ -88,13 +98,19 @@
 #define MOUTH_MOTOR_PWM_DUTY_CYCLE 255    // Proxy for motor speed, up to 2^resolution
 
 //////////////////////////////////////////////////
-static uint32_t startTime = 0;
+//      Stuff For Custom Controls     //
+File audioFile;
+volatile bool packetReady = false;
+volatile bool playbackStarted = false;
+volatile bool isPlayingAudio = false;
+#define AUDIO_FILE_PATH "/audio.raw"
+#define AUDIO_BUFFER_SIZE 512
+uint8_t audioBuffer[AUDIO_BUFFER_SIZE];
 
+static uint32_t startTime = 0;
 volatile bool useBLE = false;
 uint32_t lastBLEtime = 0;
 #define BLE_TIMEOUT_MS 2000
-volatile bool packetReady = false;
-volatile bool playbackStarted = false;
 
 // Motor event struct
 struct MotorEvent {
@@ -112,6 +128,8 @@ void sinkCallback(const uint8_t *data, uint32_t len);
 void calcFFT(void *pvParameters);
 void pushEvent(MotorEvent e);
 bool popEvent(MotorEvent &e);
+void playAudioFromSD();
+
 void headOut();
 void tailOut();
 void headTailRest();
@@ -167,10 +185,50 @@ void handleCompletePacket(uint8_t* data, size_t len) {
     packetReady = true;
     pushEvent(e);
   }
+  // Open file for writing
+  audioFile = SD.open(AUDIO_FILE_PATH, FILE_WRITE);
+  if (!audioFile) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  // Write audio portion
+  if (offset < len) {
+    size_t audioLen = len - offset;
+    audioFile.write(data + offset, audioLen);
+    Serial.printf("Wrote %d bytes of audio to SD\n", audioLen);
+  }
+
+  audioFile.close();
+
+  // Signal ready
+  packetReady = true;
 
   // Audio data starts here
   // audioSize and offset are now valid for handing off to btAudio
   (void)audioSize; // remove this line when you wire up audio handoff
+}
+void playAudioFromSD() {
+  audioFile = SD.open(AUDIO_FILE_PATH);
+
+  if (!audioFile) {
+    Serial.println("Failed to open audio file for reading");
+    isPlayingAudio = false;
+    return;
+  }
+
+  Serial.println("Starting audio playback...");
+
+  while (audioFile.available()) {
+    int bytesRead = audioFile.read(audioBuffer, AUDIO_BUFFER_SIZE);
+
+    size_t bytesWritten = 0;
+    i2s_write(I2S_NUM_0, audioBuffer, bytesRead, &bytesWritten, portMAX_DELAY);
+  }
+
+  audioFile.close();
+  Serial.println("Audio playback finished");
+
+  isPlayingAudio = false;
 }
 //////////////////////////////////////////////////
 // --- Event queue ---
@@ -276,6 +334,13 @@ void setup(){
   ledcWrite(HEADTAIL_MOTOR_PWM_CHANNEL, HEADTAIL_MOTOR_PWM_DUTY_CYCLE);
   ledcWrite(MOUTH_MOTOR_PWM_CHANNEL, MOUTH_MOTOR_PWM_DUTY_CYCLE);
 
+  // Set up SD card reader
+  if (!SD.begin(MicroSD_READER_CS)) {
+    Serial.println("SD init failed!");
+  } else {
+    Serial.println("SD init success");
+  }
+
   // Advertise Bluetooth device
   audio.begin();
   Serial.println("audio.begin() done"); // ******
@@ -327,101 +392,109 @@ void loop(){
     startTime = millis();   // 🔥 sync anchor
     playbackStarted = true;
     useBLE = true;
+    isPlayingAudio = true;
 
     Serial.println("Playback started!");
+          // Start audio in background (simple version = blocking)
+          // playAudioFromSD();
+    xTaskCreatePinnedToCore([](void*){
+      playAudioFromSD();
+      vTaskDelete(NULL);
+    }, "audioTask", 4096, NULL, 1, NULL, 0 );
   }
 
   MotorEvent e;
   uint32_t now = millis() - startTime;
 
-  if (useBLE){
-    while (popEvent(e)) {
-      if (now >= e.t) {
-        // act on the event immediately
-        // Serial.printf("FIRE motor=%u state=%u pwm=%u\n",
-        //               e.motor, e.state, e.pwm);
-  
-        if (e.motor == 0){    // Mouth
-          (e.state == 1) ? mouthOpen() : mouthRest();
-        } else if (e.motor == 1){ // Head
-          (e.state == 1) ? headOut() : headTailRest();
-        } else if (e.motor == 2){ // Tail
-          (e.state == 1) ? tailOut() : headTailRest();
-        }
+  // if (useBLE){
+  while (popEvent(e)) {
+    if (now >= e.t) {
 
-      } else {
-        // not time yet — put it back (or use a smarter structure)
-        pushEvent(e);
-        break;
+      if (e.motor == 0){    // Mouth
+        (e.state == 1) ? mouthOpen() : mouthRest();
+      } else if (e.motor == 1){ // Head
+        (e.state == 1) ? headOut() : headTailRest();
+      } else if (e.motor == 2){ // Tail
+        (e.state == 1) ? tailOut() : headTailRest();
       }
-    }
 
-    // Exit BLE mode if no events left AND timeout passed
-    if (queueHead == queueTail && (millis() - lastBLEtime > BLE_TIMEOUT_MS)) {
-      useBLE = false;
+    } else {
+      pushEvent(e);
+      break;
     }
+  }
+  // // Exit BLE mode if no events left AND timeout passed
+  // if (queueHead == queueTail && (millis() - lastBLEtime > BLE_TIMEOUT_MS)) {
+  //   useBLE = false;
+  // }
+  // delay(5);
+  // return; // Skips the FFT stuff
+  // }
 
-    delay(5);
-    return; // Skips the FFT stuff
+  //  Detect when everything is done
+  if (playbackStarted && !isPlayingAudio && queueHead == queueTail) {
+    Serial.println("Playback complete!");
+    playbackStarted = false;
+    packetReady = false;
   }
   
-  
+
   //////      GIT REPO CODE --> USES FFT     //////
   // Copy data out of the inter-process audio transfer buffer into the "real" data buffer
   // that will be used for the FFT. This is controlled with a mutex lock to ensure we
   // don't read from it and write to it at the same time.
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  for (int i = 0; i < SAMPLES_PER_FFT; i++)
-  {
-    vReal[i] = audioTransferBuffer[i];
-  }
-  xSemaphoreGive(mutex);
-
-  // Zero out the imaginary data buffer, leaving only the real data buffer written to
-  // by the bluetooth-to-I2S callback
-  for (int i = 0; i < SAMPLES_PER_FFT; i++)
-  {
-    vImag[i] = 0.0;
-  }
-
-  // Compute the FFT. Data will be stored in vReal
-  fft.windowing(FFTWindow::Hamming, FFTDirection::Forward);
-  fft.compute(FFTDirection::Forward);
-  fft.complexToMagnitude();
-
-  // Only first half of vReal contains FFT bins, per Nyquist
-  uint16_t numBins = SAMPLES_PER_FFT >> 1;
-
-  // Do we have some power in the FFT in the required band? Iterate through the FFT bins,
-  // finding ones that are within the band we are looking for, and if any power is present,
-  // report that we are receiving audio.
-  boolean receivingAudio = false;
-  for (uint16_t i = 0; i < numBins; i++)
-  {
-    double freq = ((i * 1.0 * SAMPLING_FREQUENCY) / SAMPLES_PER_FFT);
-    double power = vReal[i];
-    if (freq >= VOICE_MIN_FREQ_HZ && freq <= VOICE_MAX_FREQ_HZ && power > 0.0) {
-      receivingAudio = true;
-      digitalWrite(I2S_SD_PIN, HIGH);  //  ******
-      break;
-    }
-  }
-
-  // If we are receiving audio, stick the fish head out and flap the mouth.
-  // If not, then rest both motors.
-  if (receivingAudio)
-  {
-    headOut();
-    flapMouth();
-  }
-  else
-  {
-    headTailRest();
-    mouthRest();
-  }
-
-  // Short delay to give FreeRTOS some breathing space to not trigger the watchdog
-  delay(10);
+  // xSemaphoreTake(mutex, portMAX_DELAY);
+  // for (int i = 0; i < SAMPLES_PER_FFT; i++)
+  // {
+  //   vReal[i] = audioTransferBuffer[i];
+  // }
+  // xSemaphoreGive(mutex);
+  // 
+  // // Zero out the imaginary data buffer, leaving only the real data buffer written to
+  // // by the bluetooth-to-I2S callback
+  // for (int i = 0; i < SAMPLES_PER_FFT; i++)
+  // {
+  //   vImag[i] = 0.0;
+  // }
+  // 
+  // // Compute the FFT. Data will be stored in vReal
+  // fft.windowing(FFTWindow::Hamming, FFTDirection::Forward);
+  // fft.compute(FFTDirection::Forward);
+  // fft.complexToMagnitude();
+  // 
+  // // Only first half of vReal contains FFT bins, per Nyquist
+  // uint16_t numBins = SAMPLES_PER_FFT >> 1;
+  // 
+  // // Do we have some power in the FFT in the required band? Iterate through the FFT bins,
+  // // finding ones that are within the band we are looking for, and if any power is present,
+  // // report that we are receiving audio.
+  // boolean receivingAudio = false;
+  // for (uint16_t i = 0; i < numBins; i++)
+  // {
+  //   double freq = ((i * 1.0 * SAMPLING_FREQUENCY) / SAMPLES_PER_FFT);
+  //   double power = vReal[i];
+  //   if (freq >= VOICE_MIN_FREQ_HZ && freq <= VOICE_MAX_FREQ_HZ && power > 0.0) {
+  //     receivingAudio = true;
+  //     digitalWrite(I2S_SD_PIN, HIGH);  //  ******
+  //     break;
+  //   }
+  // }
+  // 
+  // // If we are receiving audio, stick the fish head out and flap the mouth.
+  // // If not, then rest both motors.
+  // if (receivingAudio)
+  // {
+  //   headOut();
+  //   flapMouth();
+  // }
+  // else
+  // {
+  //   headTailRest();
+  //   mouthRest();
+  // }
+  // 
+  // // Short delay to give FreeRTOS some breathing space to not trigger the watchdog
+  // delay(10);
 }
 
 // Callback for processing an audio data buffer arrived from Bluetooth. Sends the
@@ -433,10 +506,10 @@ void sinkCallback(const uint8_t *data, uint32_t len)
   int16_t* data16 = (int16_t *)data;
 
   // Write to I2S
-  size_t i2s_bytes_write = 0;
+  // size_t i2s_bytes_write = 0;
   for (int i = 0; i < samplesReceived; i++)
   {
-    i2s_write(I2S_NUM_0, data16, 2, &i2s_bytes_write, 10);
+    // i2s_write(I2S_NUM_0, data16, 2, &i2s_bytes_write, 10);
     data16++;
   }
 
