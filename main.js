@@ -353,12 +353,12 @@ function setEditMode(source){
 
 /////               SEND DATA TO FISH              /////
 sendBtn.addEventListener("click", async () => { // send via bluetooth
-  const audioBuffer = await getAudioBuffer(audioBlob);
+  const audioBuffer = await getAudioBlob(audioBlob);
   const allEvents = compileEvents() // Stores all motor movement data in array
   const packet = buildPacket(allEvents, audioBuffer);
 
   const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: ['your-service-uuid'] }]
+      filters: [{ services: ['B160BA55-AAAA-0117-3650-005006019920'] }]
   });
 
   const server = await device.gatt.connect();
@@ -440,7 +440,7 @@ function buildPacket(events, audioArrayBuffer) {
     return buffer;
 }
 
-async function getAudioBuffer(file) {
+async function getAudioBlob(file) {
     return await file.arrayBuffer();
 }
 // Each chunk: [type:1][seq:2][total:2][payload:N]

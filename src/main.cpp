@@ -77,6 +77,7 @@
 #define MOUTH_MOTOR_PIN_2 25//26
 #define MOUTH_MOTOR_PWM_PIN 32//25
 #define MOTOTR_STBY_PIN 14 //
+#define HEADs_or_TAILs 16
 
 // SD CARD READER
 #define MicroSD_READER_CS 5 //
@@ -97,7 +98,7 @@
 #define HEADTAIL_MOTOR_PWM_DUTY_CYCLE 255 // Proxy for motor speed, up to 2^resolution
 #define MOUTH_MOTOR_PWM_DUTY_CYCLE 255    // Proxy for motor speed, up to 2^resolution
 
-//////////////////////////////////////////////////
+////////////////////////////////////////////////
 //      Stuff For Custom Controls     //
 File audioFile;
 volatile bool packetReady = false;
@@ -119,13 +120,14 @@ struct MotorEvent {
     uint8_t  state;
     uint8_t  pwm;
 };
-//////////////////////////////////////////////////
+////////////////////////////////////////////////
 
 // Function defs
 void setup();
 void loop();
 void sinkCallback(const uint8_t *data, uint32_t len);
 void calcFFT(void *pvParameters);
+
 void pushEvent(MotorEvent e);
 bool popEvent(MotorEvent &e);
 void playAudioFromSD();
@@ -182,10 +184,10 @@ void handleCompletePacket(uint8_t* data, size_t len) {
 
     // Serial.printf("EVENT t=%u motor=%u state=%u pwm=%u\n",
     //               e.t, e.motor, e.state, e.pwm);
-    packetReady = true;
     pushEvent(e);
   }
   // Open file for writing
+  SD.remove(AUDIO_FILE_PATH); // Remove old stored audio  ****** SAVE ALL DATA TO BE REPLAYED LATER? ******  
   audioFile = SD.open(AUDIO_FILE_PATH, FILE_WRITE);
   if (!audioFile) {
     Serial.println("Failed to open file for writing");
@@ -237,6 +239,11 @@ MotorEvent eventQueue[MAX_EVENTS];
 volatile int queueHead = 0;
 volatile int queueTail = 0;
 
+//////////////////////////////////////////////////
+volatile bool doTest = true;// ********************************
+// void theTest();// ********************************************
+//////////////////////////////////////////////////
+
 void pushEvent(MotorEvent e) {
     int next = (queueTail + 1) % MAX_EVENTS;
     if (next == queueHead) {
@@ -264,7 +271,7 @@ class MotorCallback : public BLECharacteristicCallbacks {
     if (len < 5) return; // 5 = chunk header size
 
     // unpack the chunk header
-    uint8_t  type        = data[0];
+    // uint8_t  type        = data[0]; // ****** UNUSED --> DELETE, UTILIZE EXTRA BYTE? ******
     uint16_t seqNum      = data[1] | (data[2] << 8);
     uint16_t totalChunks = data[3] | (data[4] << 8);
     uint8_t* payload     = data + 5;
@@ -344,35 +351,29 @@ void setup(){
   // Advertise Bluetooth device
   audio.begin();
   Serial.println("audio.begin() done"); // ******
-  //////////////////////////////////////////////////
-  // Start BLE for motor data
-  BLEDevice::init(DEVICE_NAME);
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
-      CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_WRITE
-  );
-  pCharacteristic->setCallbacks(new MotorCallback());
-  pService->start();
-  BLEDevice::startAdvertising();
-  startTime = millis(); // Initialize with correct time reference
-  //////////////////////////////////////////////////
+  // 
+  // // Start BLE for motor data
+  // BLEDevice::init(DEVICE_NAME);
+  // BLEServer *pServer = BLEDevice::createServer();
+  // BLEService *pService = pServer->createService(SERVICE_UUID);
+  // BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+  //     CHARACTERISTIC_UUID,
+  //     BLECharacteristic::PROPERTY_WRITE
+  // );
+  // pCharacteristic->setCallbacks(new MotorCallback());
+  // pService->start();
+  // BLEDevice::startAdvertising();
+  // startTime = millis(); // Initialize with correct time reference
+  // 
   Serial.println("audio.begin() done"); // ******
   blinkLED(2, 200); // ****** 2 blinks = audio.begin() completed
   
-  // Try to automatically reconnect to previously connected Bluetooth device if possible
-  audio.reconnect();
-  Serial.println("audio.reconnect() done"); // ******
-  blinkLED(3, 200); // ****** 3 blinks = reconnect attempted
-
   // Set up streaming audio over I2S
   audio.I2S(I2S_BCLK_PIN, I2S_DOUT_PIN, I2S_WS_PIN);
   Serial.println("I2S done"); // ******
   blinkLED(4, 200); // ****** 4 blinks = I2S configured
 
-  // Set our custom sink callback; this will pass audio data to I2S but also store the
-  // data for FFT
+  // Set our custom sink callback; this will pass audio data to I2S but also store the data for FFT
   audio.setSinkCallback(sinkCallback);
   Serial.println("=== Setup complete ==="); // ******
   blinkLED(5, 200); // ****** 5 blinks = fully initialized
@@ -387,114 +388,123 @@ void setup(){
 // Main program loop. Runs on core 1, calculates the FFT of the latest audio sample and
 // moves the fish motors accordingly.
 void loop(){
+  // if (doTest){
+  //   doTest = false;
+  //   digitalWrite(HEADs_or_TAILs, LOW); // Turn relay OFF --> Head Motor
+  //   digitalWrite(HEADTAIL_MOTOR_PIN_1, LOW);
+  //   digitalWrite(HEADTAIL_MOTOR_PIN_2, HIGH);
+  //   delay(100);
+  //   digitalWrite(HEADTAIL_MOTOR_PIN_1, LOW);
+  //   digitalWrite(HEADTAIL_MOTOR_PIN_2, LOW);
+  // }
   //  ****** CHECK IF CUSTOM THING FROM WEBPAGE ****** //
-  if (packetReady && !playbackStarted) {
-    startTime = millis();   // 🔥 sync anchor
-    playbackStarted = true;
-    useBLE = true;
-    isPlayingAudio = true;
-
-    Serial.println("Playback started!");
-          // Start audio in background (simple version = blocking)
-          // playAudioFromSD();
-    xTaskCreatePinnedToCore([](void*){
-      playAudioFromSD();
-      vTaskDelete(NULL);
-    }, "audioTask", 4096, NULL, 1, NULL, 0 );
-  }
-
-  MotorEvent e;
-  uint32_t now = millis() - startTime;
-
-  // if (useBLE){
-  while (popEvent(e)) {
-    if (now >= e.t) {
-
-      if (e.motor == 0){    // Mouth
-        (e.state == 1) ? mouthOpen() : mouthRest();
-      } else if (e.motor == 1){ // Head
-        (e.state == 1) ? headOut() : headTailRest();
-      } else if (e.motor == 2){ // Tail
-        (e.state == 1) ? tailOut() : headTailRest();
-      }
-
-    } else {
-      pushEvent(e);
-      break;
-    }
-  }
-  // // Exit BLE mode if no events left AND timeout passed
-  // if (queueHead == queueTail && (millis() - lastBLEtime > BLE_TIMEOUT_MS)) {
-  //   useBLE = false;
+  // if (packetReady && !playbackStarted) {
+  //   startTime = millis();   // sync anchor
+  //   playbackStarted = true;
+  //   useBLE = true;
+  //   isPlayingAudio = true;
+  // 
+  //   Serial.println("Playback started!");
+  //         // Start audio in background (simple version = blocking)
+  //         // playAudioFromSD();
+  //   xTaskCreatePinnedToCore([](void*){
+  //     playAudioFromSD();
+  //     vTaskDelete(NULL);
+  //   }, "audioTask", 4096, NULL, 1, NULL, 0 );
   // }
-  // delay(5);
-  // return; // Skips the FFT stuff
+  // 
+  // MotorEvent e;
+  // uint32_t now = millis() - startTime;
+  // 
+  // // if (useBLE){
+  // while (popEvent(e)) {
+  //   if (now >= e.t) {
+  // 
+  //     if (e.motor == 0){    // Mouth
+  //       (e.state == 1) ? mouthOpen() : mouthRest();
+  //     } else if (e.motor == 1){ // Head
+  //       (e.state == 1) ? headOut() : headTailRest();
+  //     } else if (e.motor == 2){ // Tail
+  //       (e.state == 1) ? tailOut() : headTailRest();
+  //     }
+  // 
+  //   } else {
+  //     pushEvent(e);
+  //     break;
+  //   }
   // }
-
-  //  Detect when everything is done
-  if (playbackStarted && !isPlayingAudio && queueHead == queueTail) {
-    Serial.println("Playback complete!");
-    playbackStarted = false;
-    packetReady = false;
-  }
+  // // // Exit BLE mode if no events left AND timeout passed
+  // // if (queueHead == queueTail && (millis() - lastBLEtime > BLE_TIMEOUT_MS)) {
+  // //   useBLE = false;
+  // // }
+  // // delay(5);
+  // // return; // Skips the FFT stuff
+  // // }
+  // 
+  // //  Detect when everything is done
+  // if (playbackStarted && !isPlayingAudio && queueHead == queueTail) {
+  //   Serial.println("Playback complete!");
+  //   playbackStarted = false;
+  //   packetReady = false;
+  // }
   
 
   //////      GIT REPO CODE --> USES FFT     //////
   // Copy data out of the inter-process audio transfer buffer into the "real" data buffer
   // that will be used for the FFT. This is controlled with a mutex lock to ensure we
   // don't read from it and write to it at the same time.
-  // xSemaphoreTake(mutex, portMAX_DELAY);
-  // for (int i = 0; i < SAMPLES_PER_FFT; i++)
-  // {
-  //   vReal[i] = audioTransferBuffer[i];
-  // }
-  // xSemaphoreGive(mutex);
-  // 
-  // // Zero out the imaginary data buffer, leaving only the real data buffer written to
-  // // by the bluetooth-to-I2S callback
-  // for (int i = 0; i < SAMPLES_PER_FFT; i++)
-  // {
-  //   vImag[i] = 0.0;
-  // }
-  // 
-  // // Compute the FFT. Data will be stored in vReal
-  // fft.windowing(FFTWindow::Hamming, FFTDirection::Forward);
-  // fft.compute(FFTDirection::Forward);
-  // fft.complexToMagnitude();
-  // 
-  // // Only first half of vReal contains FFT bins, per Nyquist
-  // uint16_t numBins = SAMPLES_PER_FFT >> 1;
-  // 
-  // // Do we have some power in the FFT in the required band? Iterate through the FFT bins,
-  // // finding ones that are within the band we are looking for, and if any power is present,
-  // // report that we are receiving audio.
-  // boolean receivingAudio = false;
-  // for (uint16_t i = 0; i < numBins; i++)
-  // {
-  //   double freq = ((i * 1.0 * SAMPLING_FREQUENCY) / SAMPLES_PER_FFT);
-  //   double power = vReal[i];
-  //   if (freq >= VOICE_MIN_FREQ_HZ && freq <= VOICE_MAX_FREQ_HZ && power > 0.0) {
-  //     receivingAudio = true;
-  //     digitalWrite(I2S_SD_PIN, HIGH);  //  ******
-  //     break;
-  //   }
-  // }
-  // 
-  // // If we are receiving audio, stick the fish head out and flap the mouth.
-  // // If not, then rest both motors.
-  // if (receivingAudio)
-  // {
-  //   headOut();
-  //   flapMouth();
-  // }
-  // else
-  // {
-  //   headTailRest();
-  //   mouthRest();
-  // }
-  // 
-  // // Short delay to give FreeRTOS some breathing space to not trigger the watchdog
-  // delay(10);
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  for (int i = 0; i < SAMPLES_PER_FFT; i++)
+  {
+    vReal[i] = audioTransferBuffer[i];
+  }
+  xSemaphoreGive(mutex);
+  
+  // Zero out the imaginary data buffer, leaving only the real data buffer written to
+  // by the bluetooth-to-I2S callback
+  for (int i = 0; i < SAMPLES_PER_FFT; i++)
+  {
+    vImag[i] = 0.0;
+  }
+  
+  // Compute the FFT. Data will be stored in vReal
+  fft.windowing(FFTWindow::Hamming, FFTDirection::Forward);
+  fft.compute(FFTDirection::Forward);
+  fft.complexToMagnitude();
+  
+  // Only first half of vReal contains FFT bins, per Nyquist
+  uint16_t numBins = SAMPLES_PER_FFT >> 1;
+  
+  // Do we have some power in the FFT in the required band? Iterate through the FFT bins,
+  // finding ones that are within the band we are looking for, and if any power is present,
+  // report that we are receiving audio.
+  boolean receivingAudio = false;
+  for (uint16_t i = 0; i < numBins; i++)
+  {
+    double freq = ((i * 1.0 * SAMPLING_FREQUENCY) / SAMPLES_PER_FFT);
+    double power = vReal[i];
+    if (freq >= VOICE_MIN_FREQ_HZ && freq <= VOICE_MAX_FREQ_HZ && power > 0.0) {
+      receivingAudio = true;
+      digitalWrite(I2S_SD_PIN, HIGH);  //  ******
+      break;
+    }
+  }
+  
+  // If we are receiving audio, stick the fish head out and flap the mouth.
+  // If not, then rest both motors.
+  if (receivingAudio)
+  {
+    headOut();
+    flapMouth();
+  }
+  else
+  {
+    headTailRest();
+    mouthRest();
+  }
+  
+  // Short delay to give FreeRTOS some breathing space to not trigger the watchdog
+  delay(10);
 }
 
 // Callback for processing an audio data buffer arrived from Bluetooth. Sends the
@@ -506,10 +516,10 @@ void sinkCallback(const uint8_t *data, uint32_t len)
   int16_t* data16 = (int16_t *)data;
 
   // Write to I2S
-  // size_t i2s_bytes_write = 0;
+  size_t i2s_bytes_write = 0;
   for (int i = 0; i < samplesReceived; i++)
   {
-    // i2s_write(I2S_NUM_0, data16, 2, &i2s_bytes_write, 10);
+    i2s_write(I2S_NUM_0, data16, 2, &i2s_bytes_write, 10);
     data16++;
   }
 
@@ -530,11 +540,13 @@ void sinkCallback(const uint8_t *data, uint32_t len)
 
 // Bring the fish's head out
 void headOut(){
+  // digitalWrite(HEADs_or_TAILs, LOW); // Turn relay OFF --> Head Motor
   digitalWrite(HEADTAIL_MOTOR_PIN_1, LOW);
   digitalWrite(HEADTAIL_MOTOR_PIN_2, HIGH);
 }
 
-void tailOut(){ // *** ??? HOW DO I SWITCH SIGNAL FROM HEAD TO TAIL??? ***
+void tailOut(){
+  // digitalWrite(HEADs_or_TAILs, HIGH); // Turn relay ON --> Tail Motor
   digitalWrite(HEADTAIL_MOTOR_PIN_1, HIGH);
   digitalWrite(HEADTAIL_MOTOR_PIN_2, LOW);
 }
