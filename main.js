@@ -354,16 +354,25 @@ function setEditMode(source){
 /////               SEND DATA TO FISH              /////
 sendBtn.addEventListener("click", async () => { // send via bluetooth
   const audioBuffer = await getAudioBlob(audioBlob);
-  const allEvents = compileEvents() // Stores all motor movement data in array
-  const packet = buildPacket(allEvents, audioBuffer);
+    console.log("Audio size:", audioBuffer.byteLength, "bytes");
+    const allEvents = compileEvents(); // Stores all motor movement data in array
+    console.log("Events:", allEvents.length);
+    const packet = buildPacket(allEvents, audioBuffer);
+    console.log("Total packet size:", packet.byteLength, "bytes");
 
   const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: ['B160BA55-AAAA-0117-3650-005006019920'] }]
+      filters: [{ services: [0xBA55] }],
+      optionalServices: ['b160ba55-aaaa-0117-3650-005006019920']
   });
 
   const server = await device.gatt.connect();
-  const service = await server.getPrimaryService('B160BA55-AAAA-0117-3650-005006019920');
-  const characteristic = await service.getCharacteristic('0ABC1230-0021-0021-0021-333444455555');
+  // Request larger MTU for faster transfers
+  if (device.gatt.requestMTU) {
+    try { await device.gatt.requestMTU(512); } catch(e) {}
+  }
+  // const service = await server.getPrimaryService(0xBA55);
+  const service = await server.getPrimaryService('b160ba55-aaaa-0117-3650-005006019920');
+  const characteristic = await service.getCharacteristic('0abc1230-0021-0021-0021-333444455555');
 
   await sendBinary(packet, characteristic);
 })
@@ -441,8 +450,38 @@ function buildPacket(events, audioArrayBuffer) {
 }
 
 async function getAudioBlob(file) {
-    return await file.arrayBuffer();
+    // const audioContext = new AudioContext({ sampleRate: 44100 });
+    const audioContext = new AudioContext({ sampleRate: 16000 }); // lower = smaller file, still sounds fine
+    const arrayBuffer = await file.arrayBuffer();
+    
+    // Decodes MP3, WAV, M4A, OGG — anything the browser supports
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    // Mix down to mono (Billy Bass only has one speaker)
+    const numChannels = audioBuffer.numberOfChannels;
+    const length = audioBuffer.length;
+    const inputData = [];
+    for (let c = 0; c < numChannels; c++) {
+        inputData.push(audioBuffer.getChannelData(c));
+    }
+    
+    // Convert float32 samples to int16 PCM
+    const pcm = new Int16Array(length);
+    for (let i = 0; i < length; i++) {
+        // Average all channels for mono mixdown
+        let sample = 0;
+        for (let c = 0; c < numChannels; c++) {
+            sample += inputData[c][i];
+        }
+        sample /= numChannels;
+        // Clamp and convert float32 (-1.0 to 1.0) to int16 (-32768 to 32767)
+        sample = Math.max(-1, Math.min(1, sample));
+        pcm[i] = sample < 0 ? sample * 32768 : sample * 32767;
+    }
+    console.log("PCM size:", pcm.buffer.byteLength)
+    return pcm.buffer;
 }
+
 // Each chunk: [type:1][seq:2][total:2][payload:N]
 function buildChunk(type, seqNum, totalChunks, payload) {
     const buffer = new ArrayBuffer(5 + payload.length);
@@ -453,15 +492,23 @@ function buildChunk(type, seqNum, totalChunks, payload) {
     new Uint8Array(buffer, 5).set(payload);
     return buffer;
 }
+
 async function sendBinary(packet, characteristic) {
   const bytes = new Uint8Array(packet);
-  const chunkSize = 195; // 200 minus 5 bytes for the chunk header
+  const chunkSize = 195;
   const totalChunks = Math.ceil(bytes.length / chunkSize);
+  // const BATCH_SIZE = 10;
+
+  console.log(`Sending ${totalChunks} chunks...`);
+  const startTime = Date.now();
 
   for (let i = 0; i < totalChunks; i++) {
-      const slice = bytes.slice(i * chunkSize, (i + 1) * chunkSize);
-      const chunk = buildChunk(0, i, totalChunks, slice);
-      await characteristic.writeValue(chunk);
-      await new Promise(r => setTimeout(r, 15));
+    const slice = bytes.slice(i * chunkSize, (i + 1) * chunkSize);
+    const chunk = buildChunk(0, i, totalChunks, slice);
+    // await characteristic.writeValue(chunk);
+    await characteristic.writeValueWithoutResponse(chunk);
   }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`Send complete in ${elapsed}s`);
 }
