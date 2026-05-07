@@ -36,8 +36,8 @@ const backButton = document.querySelector('#backward')
 //*****      *****     *****//
 
 /////         Global Variables         /////
-const minMouthTime = 0.25 // seconds
-const minBodyTime = 0.5 // seconds
+const minMouthTime = 0.001 // seconds
+const minBodyTime = 0.002 // seconds
 const minHeadTime = 1.5 // seconds
 const minTailTime = 0.5 // seconds
 
@@ -356,6 +356,7 @@ sendBtn.addEventListener("click", async () => { // send via bluetooth
   const audioBuffer = await getAudioBlob(audioBlob);
     console.log("Audio size:", audioBuffer.byteLength, "bytes");
     const allEvents = compileEvents(); // Stores all motor movement data in array
+    // console.log(allEvents);
     console.log("Events:", allEvents.length);
     const packet = buildPacket(allEvents, audioBuffer);
     console.log("Total packet size:", packet.byteLength, "bytes");
@@ -366,10 +367,17 @@ sendBtn.addEventListener("click", async () => { // send via bluetooth
   });
 
   const server = await device.gatt.connect();
-  // Request larger MTU for faster transfers
-  if (device.gatt.requestMTU) {
-    try { await device.gatt.requestMTU(512); } catch(e) {}
+  
+  // Force the MTU request and actually wait for it
+  try {
+      if (device.gatt.requestMTU) {
+          await device.gatt.requestMTU(512);
+          console.log("MTU set to 512");
+      }
+  } catch(e) {
+      console.log("MTU request failed, continuing with default", e);
   }
+
   // const service = await server.getPrimaryService(0xBA55);
   const service = await server.getPrimaryService('b160ba55-aaaa-0117-3650-005006019920');
   const characteristic = await service.getCharacteristic('0abc1230-0021-0021-0021-333444455555');
@@ -495,7 +503,7 @@ function buildChunk(type, seqNum, totalChunks, payload) {
 
 async function sendBinary(packet, characteristic) {
   const bytes = new Uint8Array(packet);
-  const chunkSize = 195;
+  const chunkSize = 480; //195;
   const totalChunks = Math.ceil(bytes.length / chunkSize);
   // const BATCH_SIZE = 10;
 
@@ -505,8 +513,11 @@ async function sendBinary(packet, characteristic) {
   for (let i = 0; i < totalChunks; i++) {
     const slice = bytes.slice(i * chunkSize, (i + 1) * chunkSize);
     const chunk = buildChunk(0, i, totalChunks, slice);
-    // await characteristic.writeValue(chunk);
+    // This sends without waiting for an "OK" from the fish every time --> much faster.
     await characteristic.writeValueWithoutResponse(chunk);
+    
+    // Tiny delay every 20 chunks to prevent overflowing the ESP32's buffer
+    if (i % 20 === 0) await new Promise(r => setTimeout(r, 10));
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
