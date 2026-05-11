@@ -127,6 +127,9 @@ img{
 #saveBtn{
     background-image: url('images/icon_save.png');
 }
+#loadDataBtn{
+    background-image: url('images/icon_loadData.png');
+}
 #clearBtn{
     background-image: url('images/icon_clear.png');
 }

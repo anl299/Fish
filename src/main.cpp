@@ -79,7 +79,7 @@
     // or the ESP32 will crash on boot!
 #define HEADTAIL_MOTOR_PIN_1 4//12  <-- Motor B
 #define HEADTAIL_MOTOR_PIN_2 14 // Was 17
-#define HEADTAIL_MOTOR_PWM_PIN 13//13
+#define HEADTAIL_MOTOR_PWM_PIN 13
 #define MOUTH_MOTOR_PIN_1 25//27    <-- Motor A
 #define MOUTH_MOTOR_PIN_2 33//26
 #define MOUTH_MOTOR_PWM_PIN 32//25
@@ -163,13 +163,11 @@ SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
 // btAudio audio = btAudio(DEVICE_NAME);
 // 
 //////////////////////////////////////////////////
-// Max buffer: tune this to your expected max packet size
-// uint8_t* reassemblyBuf = NULL; 
-// const size_t REASSEMBLY_SIZE = 262144;
-// //*** */ static uint8_t  reassemblyBuf[32768];
-// static uint16_t expectedChunks = 0;
-// static uint16_t receivedChunks = 0;
-// static size_t   reassemblyLen  = 0;
+///
+uint8_t* pcmBuffer = NULL; 
+size_t pcmBufferSize = 1024 * 1024; // 1 Megabyte
+size_t currentWritePos = 0;
+///
 static File receiveFile;
 static uint16_t expectedChunks = 0;
 static uint16_t receivedChunks = 0;
@@ -269,7 +267,7 @@ void playAudioFromSD() {
 }
 //////////////////////////////////////////////////
 // --- Event queue ---
-#define MAX_EVENTS 64
+#define MAX_EVENTS 500 //64
 MotorEvent eventQueue[MAX_EVENTS];
 volatile int queueHead = 0;
 volatile int queueTail = 0;
@@ -499,6 +497,15 @@ void setup(){
   Serial.printf("Free heap at boot: %d bytes\n", ESP.getFreeHeap());
   // Serial.printf("Free heap min: %d\n", ESP.getMinFreeHeap());
   Serial.println("=== Boot start ==="); // ******
+  
+  ///    Initialize PSRAM
+  if(psramInit()){
+      Serial.println("PSRAM detected! Billy has a big brain now.");
+      pcmBuffer = (uint8_t*)ps_malloc(pcmBufferSize); 
+  } else {
+      Serial.println("PSRAM NOT FOUND. Check your board settings!");
+  }
+  ///
 
   // Set up debug LED
   pinMode(LED_PIN, OUTPUT);

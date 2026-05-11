@@ -4,6 +4,11 @@ import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/region
 import Timeline from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.esm.js'
 import Record from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/record.esm.js'
 
+// If using a bundler (Vite, Webpack, or Parcel): Run: 'npm install jszip'. Then use:
+    //      import JSZip from "jszip"
+// If using plain HTML/JS file (no bundler): Include the library via a CDN in HTML <head>:
+    //      <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.min.js"></script>
+
 
 /////         Store UI Elements         /////
 const fileInput = document.getElementById('fileInput')
@@ -18,6 +23,8 @@ const zoomSlider = document.getElementById('zoomSlider')
 const drawBtn = document.getElementById('drawBtn')
 const eraseBtn = document.getElementById('eraseBtn')
 const saveBtn = document.getElementById('saveBtn')
+const loadDataBtn = document.getElementById('loadDataBtn')
+// const fishFileInput = document.getElementById('fishFileInput');
 const clearBtn = document.getElementById('clearBtn')
 const sendBtn = document.getElementById('sendBtn')
 
@@ -149,6 +156,7 @@ function initializeWaveSurfers(){
 
   // When recording ends, the plugin will emit a blob we can load into the master (and the linked views auto-update)
   recordPlugin.on('record-end', (blob) => {
+    // resetPage() // ****** Clear all waveforms/regions  ******
     loadAudioBlob(blob)
   })
 
@@ -271,12 +279,16 @@ function initializeWaveSurfers(){
   fileInput.addEventListener('change', function(e){ // file input: when a file is selected, load it into the master
     const file = this.files && this.files[0]
     if (!file) return
+
+    // resetPage() // Clear all waveforms/regions
+    
+    // loadFile(file);
     const reader = new FileReader()
     reader.onload = (evt) => {
-      const blob = new Blob([new Uint8Array(evt.target.result)])
-      loadAudioBlob(blob)
-    }
-    reader.readAsArrayBuffer(file)
+    const blob = new Blob([new Uint8Array(evt.target.result)])
+    loadAudioBlob(blob)
+  }
+  reader.readAsArrayBuffer(file)
   }, false)
 
   recordBtn.addEventListener('click', async () => {// record button: toggle recording through the plugin API
@@ -348,6 +360,174 @@ function setEditMode(source){
     drawBtn.classList.remove("drawStyleSelected")
     eraseBtn.classList.add("drawStyleSelected")
   }
+}
+
+
+/////               SAVE/LOAD --> MUSIC + MOTOR DATA              /////
+saveBtn.addEventListener("click", async() => {
+  const zip = new JSZip();
+  
+  // Add the JSON data as a string
+  const motorData = compileEvents();
+  zip.file("motor-data.json", JSON.stringify(motorData, null, 2));
+  
+  // Save the original audio blob
+  // This preserves the original file's type inside the zip
+  const extension = (audioBlob.type.split('/')[1] || 'bin').split(';')[0].trim(); 
+  // const extension = audioBlob.type.split('/')[1] || 'bin'; 
+  zip.file(`audio.${extension}`, audioBlob);
+
+
+  // Generate the zip file
+  const content = await zip.generateAsync({type:"blob"});
+  
+  // Trigger automatic download
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(content);
+  link.download = "my_fish_dance.fish"; //  *** Change name to use original audio file
+  link.click();
+})
+
+loadDataBtn.addEventListener("click", () => {
+  const fishFileInput = document.createElement("input");
+  fishFileInput.type = "file";
+  fishFileInput.accept = ".fish";
+  // fishFileInput.style.display = "none";
+  // document.body.appendChild(fishFileInput); // Need to append to avoid possible browser security
+  
+  fishFileInput.addEventListener("change", async(e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+  
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const dataFile = zip.file("motor-data.json");
+      const audioFileName = Object.keys(zip.files).find(name => name.startsWith("audio."));
+      const audioFile = audioFileName ? zip.file(audioFileName) : null;
+
+      console.log(zip)
+      // Check if the file exists in the zip before trying to read it
+      if (!dataFile || !audioFile) {
+        alert("Error: This doesn't look like a valid Billy Bass project file!");
+        return;
+      }
+      
+      resetPage() // Clear all waveforms/regions
+  
+      // Extract motor data and audio file
+      const motorData = JSON.parse(await dataFile.async("text"));
+      const extractedAudioBlob = await audioFile.async("blob");
+      
+      loadAudioBlob(extractedAudioBlob); // Use existing function for waveform + global variable update!
+      loadedData(motorData); // Update the timeline/motor data
+      // loadFile(audioUrl)
+      // console.log(motorData)
+  
+    } catch (err) {
+      console.error("Failed to load zip:", err);
+      alert("Something went wrong reading the file.");
+    }
+  })
+
+  fishFileInput.click(); // Needed to trigger the above addEventListener
+})
+
+// loadDataBtn.addEventListener("click", () => {
+//   resetPage();
+//   fishFileInput.click();
+// });
+// fishFileInput.addEventListener("change", async(e) => {
+//   const file = e.target.files[0];
+//   if (!file) return;
+
+//   try {
+//     const zip = await JSZip.loadAsync(file);
+
+//     // Check if the file exists in the zip before trying to read it
+//     const dataFile = zip.file("motor-data.json");
+//     // const audioFile = zip.file("audio.bin");
+//     const audioFileName = Object.keys(zip.files).find(name => name.startsWith("audio."));
+//     const audioFile = audioFileName ? zip.file(audioFileName) : null;
+//     console.log(zip)
+//     if (!dataFile || !audioFile) {
+//       alert("Error: This doesn't look like a valid Billy Bass project file!");
+//       return;
+//     }
+
+//     // 1. Extract motor data and audio file
+//     const motorData = JSON.parse(await dataFile.async("text"));
+//     const extractedAudioBlob = await audioFile.async("blob");
+
+//     // Use your existing function so the waveform and global variable update!
+//     loadAudioBlob(extractedAudioBlob); 
+    
+//     // Update your timeline/motor data variable
+//     // (Assuming you have a global variable for this)
+//     loadedData(motorData);
+
+//     console.log("Project Loaded Successfully!", motorData);
+//     // loadFile(audioUrl)
+//     // console.log(motorData)
+
+//   } catch (err) {
+//     console.error("Failed to load zip:", err);
+//     alert("Something went wrong reading the file.");
+//   } finally {
+//     // Reset the input so you can load the same file twice if you wanted to
+//     fishFileInput.value = "";
+//   }
+//   // return { motorData, audioUrl };
+// })
+
+function resetPage(){
+  audioWave_full.empty();
+  audioWave_mouth.empty();
+  audioWave_body.empty();
+  regions_mouth.clearRegions();
+  regions_body.clearRegions();
+  if (bodyMode == "tail"){
+    swapBodyMode();
+  }
+}
+
+function loadedData(motorData, audio){
+  const ordered = Object.groupBy(motorData, ({motor}) => motor );
+
+  // Wait until Wavesurfer waveforms are ready
+  audioWave_body.once('ready', () => { // 'audioWave_mouth' should be ready before 'audioWave_body' <-- ?is true?
+    restoreRegions(ordered.mouth, 'mouth', 'rgba(50,125,255,0.25)', minMouthTime);
+    restoreRegions(ordered.head, 'head', 'rgba(50,255,50,0.25)', minBodyTime); // minHeadTime);
+    swapBodyMode(); // Enter 'tail' mode
+    restoreRegions(ordered.tail, 'tail', 'rgba(255,50,50,0.25)', minBodyTime); // minTailTime);
+    swapBodyMode(); // Return to 'head' mode
+  })
+
+  function restoreRegions(events, body, color, minLength) {
+    if (!events) return;
+    const whichRegion = (body=='mouth') ? regions_mouth : regions_body
+    if (body=='head'){
+      
+    }
+    let startTime = null;
+
+    events.forEach(e => {
+      if (e.state == 1){
+        startTime = e.t;
+      } else if (startTime !== null){
+        const newRegion = whichRegion.addRegion({
+          start: startTime/1000,  // Change time from milliseconds --> seconds
+          end: e.t/1000,  // Change time from milliseconds --> seconds
+          color: color,
+          minLength: minLength,
+          drag: true,
+          resize: true
+        })
+        newRegion.motor = body;
+        startTime = null; // Reset
+      }
+    })
+  }
+  
 }
 
 
