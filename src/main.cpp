@@ -77,14 +77,15 @@
   // On WROVER modules, pins 16 & 17 are usually connected internally to the PSRAM chip.
     // If your motor controller is hooked to 16 or 17, Billy Bass might start twitching randomly
     // or the ESP32 will crash on boot!
-#define HEADTAIL_MOTOR_PIN_1 4//12  <-- Motor B
-#define HEADTAIL_MOTOR_PIN_2 14 // Was 17
+//  H-Bridge output pins: Aout1, Aou2, GND, GND, Bout2, Bout1  //
 #define HEADTAIL_MOTOR_PWM_PIN 13
-#define MOUTH_MOTOR_PIN_1 25//27    <-- Motor A
-#define MOUTH_MOTOR_PIN_2 33//26
-#define MOUTH_MOTOR_PWM_PIN 32//25
+#define HEADTAIL_MOTOR_PIN_2 14 // Move to 14?  Was 17 --> GPIO 16/17 PSRAM on WROVER model --> UNUSABLE
+#define HEADTAIL_MOTOR_PIN_1 4
 // #define MOTOTR_STBY_PIN 14 //
-// #define HEADs_or_TAILs 12 // Was 16
+#define MOUTH_MOTOR_PIN_2 25
+#define MOUTH_MOTOR_PIN_1 33
+#define MOUTH_MOTOR_PWM_PIN 32
+// #define HEADs_or_TAILs 16  // Move to 12?
 
 // SD CARD READER
 #define MicroSD_READER_CS 5 //
@@ -171,11 +172,11 @@ size_t currentWritePos = 0;
 static File receiveFile;
 static uint16_t expectedChunks = 0;
 static uint16_t receivedChunks = 0;
-static size_t totalBytesWritten = 0;
-static bool headerParsed = false;
+// static size_t totalBytesWritten = 0;
+// static bool headerParsed = false;
 // Header fields parsed from first chunk
 static uint16_t numEvents = 0;
-static uint32_t audioSize = 0;
+// static uint32_t audioSize = 0;
 static uint8_t headerBuf[6 + 64*7]; // enough for header + up to 64 motor events
 static size_t headerBufLen = 0;
 static bool headerComplete = false;
@@ -268,6 +269,7 @@ void playAudioFromSD() {
 //////////////////////////////////////////////////
 // --- Event queue ---
 #define MAX_EVENTS 500 //64
+
 MotorEvent eventQueue[MAX_EVENTS];
 volatile int queueHead = 0;
 volatile int queueTail = 0;
@@ -299,24 +301,8 @@ bool popEvent(MotorEvent &e) {
   portEXIT_CRITICAL(&queueMux);
   return true;
 }
-// void pushEvent(MotorEvent e) {
-//     int next = (queueTail + 1) % MAX_EVENTS;
-//     if (next == queueHead) {
-//         Serial.println("WARNING: event queue full");
-//         return;
-//     }
-//     eventQueue[queueTail] = e;
-//     queueTail = next;
-// } /// *** ?????? "queueHead" & "queueTail" ?????? ***
-// 
-// bool popEvent(MotorEvent &e) {
-//     if (queueHead == queueTail) return false; // empty
-//     e = eventQueue[queueHead];
-//     queueHead = (queueHead + 1) % MAX_EVENTS;
-//     return true;
-// }
 
-//////////////////////////////////////////////////
+
 // Called whenever a BLE client writes to the characteristic  //////////////
 class MotorCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
@@ -331,33 +317,38 @@ class MotorCallback : public BLECharacteristicCallbacks {
     uint8_t* payload = data + 5;
     size_t payloadLen = len - 5;
 
-    if (seqNum == 0) {
-      if (!SD.exists("/")) {
-        Serial.println("SD not mounted, attempting remount...");
-        if (!SD.begin(MicroSD_READER_CS)) {
-          Serial.println("ERROR: SD remount failed");
-          return;
-        }
-      }
-      //  CHECK FIRST IF AUDIO EXISTS BEFORE TRYING TO REMOVE IT   //
-      if (SD.exists(AUDIO_FILE_PATH)) {
-        SD.remove(AUDIO_FILE_PATH);
-      }
+    if (seqNum == 0) {// Prepare SD card
+      if (SD.exists(AUDIO_FILE_PATH)) SD.remove(AUDIO_FILE_PATH);
       receiveFile = SD.open(AUDIO_FILE_PATH, FILE_WRITE);
-      if (!receiveFile) {
-        Serial.println("ERROR: Could not open SD for writing");
-        return;
-      }
-      if (!SD.begin(MicroSD_READER_CS)) {
-        Serial.println("ERROR: SD reinit failed");
-        return;
-      }
+
+      // if (!SD.exists("/")) {
+      //   Serial.println("SD not mounted, attempting remount...");
+      //   if (!SD.begin(MicroSD_READER_CS)) {
+      //     Serial.println("ERROR: SD remount failed");
+      //     return;
+      //   }
+      // }
+      // //  CHECK FIRST IF AUDIO EXISTS BEFORE TRYING TO REMOVE IT   //
+      // if (SD.exists(AUDIO_FILE_PATH)) {
+      //   SD.remove(AUDIO_FILE_PATH);
+      // }
+      // receiveFile = SD.open(AUDIO_FILE_PATH, FILE_WRITE);
+      // if (!receiveFile) {
+      //   Serial.println("ERROR: Could not open SD for writing");
+      //   return;
+      // }
+      // if (!SD.begin(MicroSD_READER_CS)) {
+      //   Serial.println("ERROR: SD reinit failed");
+      //   return;
+      // }
+
       expectedChunks = totalChunks;
       receivedChunks = 0;
       headerComplete = false;
       headerBufLen = 0;
       Serial.println("Fast Sync Started...");
     }
+    
     if (receiveFile) {
       // If we haven't finished the motor list, keep buffering it
       if (!headerComplete) {
@@ -400,73 +391,7 @@ class MotorCallback : public BLECharacteristicCallbacks {
     }
   }
 };
-    // receiveFile = SD.open(AUDIO_FILE_PATH, FILE_WRITE);
-    // if (!receiveFile) {
-    //   Serial.println("ERROR: Could not open SD for writing");
-    //   return;
-    // }
-    // Serial.println("Receiving packet...");
-// 
-    // Buffer bytes until we have the full header (6 bytes + all motor events)
-//     if (!headerComplete) {
-//       // Copy into headerBuf until we know how big the header is
-//       size_t copy = min(payloadLen, sizeof(headerBuf) - headerBufLen);
-//       memcpy(headerBuf + headerBufLen, payload, copy);
-//       headerBufLen += copy;
-// 
-//       // Do we have enough to know the event count?
-//       if (headerBufLen >= 6) {
-//         numEvents = headerBuf[0] | (headerBuf[1] << 8);
-//         audioSize = headerBuf[2] | (headerBuf[3] << 8) 
-//                   | (headerBuf[4] << 16) | (headerBuf[5] << 24);
-//         size_t fullHeaderSize = 6 + (numEvents * 7);
-// 
-//         // Do we have the full header yet?
-//         if (headerBufLen >= fullHeaderSize) {
-//           headerComplete = true;
-// 
-//           // Parse motor events from header
-//           int offset = 6;
-//           for (int i = 0; i < numEvents; i++) {
-//             if (offset + 7 > (int)headerBufLen) break;
-//             MotorEvent e;
-//             e.t     = headerBuf[offset]   | (headerBuf[offset+1] << 8)
-//                     | (headerBuf[offset+2] << 16) | (headerBuf[offset+3] << 24);
-//             e.motor = headerBuf[offset+4];
-//             e.state = headerBuf[offset+5];
-//             e.pwm   = headerBuf[offset+6];
-//             offset += 7;
-//             pushEvent(e);
-//           }
-// 
-//           // Write any audio bytes that arrived in this same chunk after the header
-//           if (headerBufLen > fullHeaderSize) {
-//             size_t audioBytes = headerBufLen - fullHeaderSize;
-//             receiveFile.write(headerBuf + fullHeaderSize, audioBytes);
-//             totalBytesWritten += audioBytes;
-//           }
-//         }
-//       }
-//     } else {
-//       // Header already parsed — write payload straight to SD
-//       receiveFile.write(payload, payloadLen);
-//       totalBytesWritten += payloadLen;
-//     }
-// 
-//     receivedChunks++;
-//     expectedChunks = totalChunks;
-// 
-//     // Last chunk
-//     if (receivedChunks == expectedChunks) {
-//       receiveFile.close();
-//       Serial.printf("Receive complete: %d events, %d audio bytes written\n",
-//                     numEvents, totalBytesWritten);
-//       startTime = millis();   // sync anchor
-//       packetReady = true;
-//     }
-//   }
-// };
-//////////////////////////////////////////////////
+
 
 //////      FOR DEBUGGING     //////
 void blinkLED(int times, int delayMs) {
@@ -479,6 +404,7 @@ void blinkLED(int times, int delayMs) {
   delay(500); // Gap between blink groups
 }
 ////////////////////////////////////
+
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     Serial.println("Client connected");
@@ -489,6 +415,20 @@ class ServerCallbacks : public BLEServerCallbacks {
     BLEDevice::startAdvertising();
   }
 };
+
+//////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////
+void playAudioFromRAM() {
+    digitalWrite(I2S_SD_PIN, HIGH); // Amp ON
+    size_t bytesWritten = 0;
+    
+    // Send the whole buffer to the I2S driver
+    i2s_write(I2S_NUM_0, pcmBuffer, currentWritePos, &bytesWritten, portMAX_DELAY);
+    
+    digitalWrite(I2S_SD_PIN, LOW); // Amp OFF
+    isPlayingAudio = false;
+}/////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////
 
 // Setup and run the program
 void setup(){
@@ -509,7 +449,7 @@ void setup(){
 
   // Set up debug LED
   pinMode(LED_PIN, OUTPUT);
-  // blinkLED(1, 200); // ****** 1 blink = boot started
+  blinkLED(1, 200); // ****** 1 blink = boot started
 
   pinMode(I2S_SD_PIN, OUTPUT); // ******
   digitalWrite(I2S_SD_PIN, LOW); // ******
@@ -536,6 +476,7 @@ void setup(){
   digitalWrite(MOUTH_MOTOR_PIN_2, LOW);
   // digitalWrite(HEADs_or_TAILs, LOW);
 
+  blinkLED(2, 200);
 // FROM HERE ***
   i2sbullshit();
   Serial.printf("Free heap after I2S: %d bytes\n", ESP.getFreeHeap());
@@ -550,6 +491,8 @@ void setup(){
     Serial.println("SD init success");
   }
   Serial.printf("Free heap after SD: %d bytes\n", ESP.getFreeHeap());
+
+  blinkLED(3, 200);
 
   // Allocate buffer on the heap
   // reassemblyBuf = (uint8_t*)malloc(REASSEMBLY_SIZE);
@@ -567,8 +510,7 @@ void setup(){
   BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
   BLEDevice::setMTU(517); // Request maximum packet size
-
-  // These lines are missing from your current code — add them back
+  
   BLEService *pService = pServer->createService(BLEUUID::fromString(SERVICE_UUID));
   BLECharacteristic *pCharacteristic = pService->createCharacteristic(
     BLEUUID::fromString(CHARACTERISTIC_UUID),
@@ -601,7 +543,7 @@ void setup(){
   // // data for FFT
   //*** */ audio.setSinkCallback(sinkCallback);
   Serial.println("=== Setup complete ==="); // ******
-  blinkLED(3, 200); // ****** 5 blinks = fully initialized
+  blinkLED(5, 200); // ****** 5 blinks = fully initialized
 // TO HERE ***
 
   Serial.println("****************************************"); // ******
@@ -643,6 +585,17 @@ uint8_t i=0;
 // Main program loop. Runs on core 1, calculates the FFT of the latest audio sample and
 // moves the fish motors accordingly.
 void loop(){
+  blinkLED(1, 200);
+  digitalWrite(MOUTH_MOTOR_PIN_1, HIGH);  //            Mouth ON
+  delay(1000);
+  digitalWrite(MOUTH_MOTOR_PIN_1, LOW);   //  Mouth OFF
+  digitalWrite(HEADTAIL_MOTOR_PIN_1, HIGH); //          Head ON
+  delay(1000);
+  digitalWrite(HEADTAIL_MOTOR_PIN_1, LOW); //  Head OFF
+  digitalWrite(HEADTAIL_MOTOR_PIN_2, HIGH); //          Tail ON
+  delay(1000);
+  digitalWrite(HEADTAIL_MOTOR_PIN_2, LOW); //  Tail OFF
+  delay(3000);
   // if (i<5){
   //   digitalWrite(HEADs_or_TAILs, LOW);
   //   // Relay Off
@@ -665,44 +618,46 @@ void loop(){
   //   i++;
   //   delay(3000);
   // }
+  
+// // NEWER MAIN LOOP
 // Trigger playback when data is fully received
-  if (packetReady && !playbackStarted) {
-    playbackStarted = true;
-    isPlayingAudio = true;
-    startTime = millis(); // Set the start time RIGHT NOW
-    
-    // Launch audio on Core 0 (System Core)
-    xTaskCreatePinnedToCore([](void*){
-      playAudioFromSD();
-      vTaskDelete(NULL);
-    }, "audioTask", 8192, NULL, 1, NULL, 0);
-  }
-
-  if (playbackStarted) {
-    uint32_t now = millis() - startTime;
-    MotorEvent e;
-
-    // Check if the next event in the queue is ready to trigger
-    while (queueHead != queueTail) {
-      if (now >= eventQueue[queueHead].t) {
-        popEvent(e); // Pull it out of the list
-        
-        // Execute movement
-        if (e.motor == 0) (e.state == 1) ? mouthOpen() : mouthClose();
-        else if (e.motor == 1) (e.state == 1) ? headOut() : headBack();
-        else if (e.motor == 2) (e.state == 1) ? tailOut() : tailBack();
-      } else {
-        break; // Next event isn't ready yet
-      }
-    }
-
-    // Clean up when done
-    if (!isPlayingAudio && queueHead == queueTail) {
-      playbackStarted = false;
-      packetReady = false;
-      Serial.println("Fish is resting.");
-    }
-  }
+  // if (packetReady && !playbackStarted) {
+  //   playbackStarted = true;
+  //   isPlayingAudio = true;
+  //   startTime = millis(); // Set the start time RIGHT NOW
+  // 
+  //   // Launch audio on Core 0 (System Core)
+  //   xTaskCreatePinnedToCore([](void*){
+  //     playAudioFromSD();
+  //     vTaskDelete(NULL);
+  //   }, "audioTask", 8192, NULL, 1, NULL, 0);
+  // }
+  // 
+  // if (playbackStarted) {
+  //   uint32_t now = millis() - startTime;
+  //   MotorEvent e;
+  // 
+  //   // Check if the next event in the queue is ready to trigger
+  //   while (queueHead != queueTail) {
+  //     if (now >= eventQueue[queueHead].t) {
+  //       popEvent(e); // Pull it out of the list
+  // 
+  //       // Execute movement
+  //       if (e.motor == 0) (e.state == 1) ? mouthOpen() : mouthClose();
+  //       else if (e.motor == 1) (e.state == 1) ? headOut() : headBack();
+  //       else if (e.motor == 2) (e.state == 1) ? tailOut() : tailBack();
+  //     } else {
+  //       break; // Next event isn't ready yet
+  //     }
+  //   }
+  // 
+  //   // Clean up when done
+  //   if (!isPlayingAudio && queueHead == queueTail) {
+  //     playbackStarted = false;
+  //     packetReady = false;
+  //     Serial.println("Fish is resting.");
+  //   }
+  // }
 
   // // FROM HERE ***
   // //  ****** CHECK IF CUSTOM THING FROM WEBPAGE ****** //

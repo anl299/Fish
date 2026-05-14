@@ -371,13 +371,10 @@ saveBtn.addEventListener("click", async() => {
   const motorData = compileEvents();
   zip.file("motor-data.json", JSON.stringify(motorData, null, 2));
   
-  // Save the original audio blob
-  // This preserves the original file's type inside the zip
-  const extension = (audioBlob.type.split('/')[1] || 'bin').split(';')[0].trim(); 
-  // const extension = audioBlob.type.split('/')[1] || 'bin'; 
+  // Save the original audio blob --> preserve the original file's type inside the zip
+  const extension = (audioBlob.type.split('/')[1] || 'bin').split(';')[0].trim();
   zip.file(`audio.${extension}`, audioBlob);
-
-
+  
   // Generate the zip file
   const content = await zip.generateAsync({type:"blob"});
   
