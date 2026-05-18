@@ -534,17 +534,14 @@ sendBtn.addEventListener("click", async () => { // send via bluetooth
     console.log("Audio size:", audioBuffer.byteLength, "bytes");
     const allEvents = compileEvents(); // Stores all motor movement data in array
     // console.log(allEvents);
-    console.log("Events:", allEvents.length);
+    // console.log("Events:", allEvents.length);
     const packet = buildPacket(allEvents, audioBuffer);
     console.log("Total packet size:", packet.byteLength, "bytes");
-
   const device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [0xBA55] }],
       optionalServices: ['b160ba55-aaaa-0117-3650-005006019920']
   });
-
   const server = await device.gatt.connect();
-  
   // Force the MTU request and actually wait for it
   try {
       if (device.gatt.requestMTU) {
@@ -554,11 +551,9 @@ sendBtn.addEventListener("click", async () => { // send via bluetooth
   } catch(e) {
       console.log("MTU request failed, continuing with default", e);
   }
-
   // const service = await server.getPrimaryService(0xBA55);
   const service = await server.getPrimaryService('b160ba55-aaaa-0117-3650-005006019920');
   const characteristic = await service.getCharacteristic('0abc1230-0021-0021-0021-333444455555');
-
   await sendBinary(packet, characteristic);
 })
 function compileEvents(){
@@ -595,7 +590,6 @@ function compileEvents(){
   events.sort((a,b) => a.t - b.t)
   return events
 }
-
 const MOTOR_MAP = {
     mouth: 0,
     head: 1,
@@ -604,15 +598,11 @@ const MOTOR_MAP = {
 function buildPacket(events, audioArrayBuffer) {
     const numEvents = events.length;
     const audioSize = audioArrayBuffer.byteLength;
-
     const headerSize = 2 + 4; // uint16 + uint32
     const eventSize = 7;      // per event
-
     const totalSize = headerSize + (numEvents * eventSize) + audioSize;
-
     const buffer = new ArrayBuffer(totalSize);
     const view = new DataView(buffer);
-
     let offset = 0;
 
     // HEADER
@@ -633,9 +623,7 @@ function buildPacket(events, audioArrayBuffer) {
 
     return buffer;
 }
-
 async function getAudioBlob(file) {
-    // const audioContext = new AudioContext({ sampleRate: 44100 });
     const audioContext = new AudioContext({ sampleRate: 16000 }); // lower = smaller file, still sounds fine
     const arrayBuffer = await file.arrayBuffer();
     
@@ -666,37 +654,46 @@ async function getAudioBlob(file) {
     console.log("PCM size:", pcm.buffer.byteLength)
     return pcm.buffer;
 }
-
 // Each chunk: [type:1][seq:2][total:2][payload:N]
-function buildChunk(type, seqNum, totalChunks, payload) {
-    const buffer = new ArrayBuffer(5 + payload.length);
-    const view = new DataView(buffer);
-    view.setUint8(0, type);        // 0=motor, 1=audio
-    view.setUint16(1, seqNum, true);
-    view.setUint16(3, totalChunks, true);
-    new Uint8Array(buffer, 5).set(payload);
-    return buffer;
-}
+// --- UPDATED WIFI SEND LOGIC ---
+sendBtn.addEventListener("click", async () => { 
+  console.log("Processing audio and motor data...");
+  
+  // 1. Build the data
+  const audioBuffer = await getAudioBlob(audioBlob); // Ensure audioBlob is available in scope
+  console.log("Audio size:", audioBuffer.byteLength, "bytes");
+  
+  const allEvents = compileEvents();
+  console.log("Events:", allEvents.length);
+  
+  const packet = buildPacket(allEvents, audioBuffer);
+  console.log("Total packet size:", packet.byteLength, "bytes");
 
-async function sendBinary(packet, characteristic) {
-  const bytes = new Uint8Array(packet);
-  const chunkSize = 480; //195;
-  const totalChunks = Math.ceil(bytes.length / chunkSize);
-  // const BATCH_SIZE = 10;
+  // 2. Package for Web Server upload
+  // Convert the raw ArrayBuffer into a Blob so we can send it as a file
+  const blob = new Blob([packet], { type: 'application/octet-stream' });
+  const formData = new FormData();
+  formData.append("file", blob, "payload.bin"); 
 
-  console.log(`Sending ${totalChunks} chunks...`);
+  // 3. Send to ESP32
+  console.log("Uploading to fish via Wi-Fi...");
   const startTime = Date.now();
 
-  for (let i = 0; i < totalChunks; i++) {
-    const slice = bytes.slice(i * chunkSize, (i + 1) * chunkSize);
-    const chunk = buildChunk(0, i, totalChunks, slice);
-    // This sends without waiting for an "OK" from the fish every time --> much faster.
-    await characteristic.writeValueWithoutResponse(chunk);
-    
-    // Tiny delay every 20 chunks to prevent overflowing the ESP32's buffer
-    if (i % 20 === 0) await new Promise(r => setTimeout(r, 10));
-  }
+  try {
+    // Because the HTML/JS is hosted on the ESP32 itself, 
+    // we can just use the relative path '/upload'
+    const response = await fetch('http://billybass.local/upload', {
+      method: 'POST',
+      body: formData
+    });
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`Send complete in ${elapsed}s`);
-}
+    if (response.ok) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`Upload complete in ${elapsed}s! Music should start automatically.`);
+    } else {
+      console.error("Upload failed. ESP32 returned status:", response.status);
+    }
+  } catch (e) {
+    console.error("Network error during upload:", e);
+  }
+});

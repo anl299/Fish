@@ -1,0 +1,237 @@
+body {
+    display: flex;
+    flex-direction: column;
+    width: 75%;
+    margin: auto;
+    /* overflow-x: hidden;
+    overflow-y: auto; */
+}
+section{
+    display: inline-block;
+    width: 100%;
+}
+.flexStyle{
+    display: flex;
+    width: 100%;
+    flex: 1;
+    justify-content: space-evenly;
+}
+
+.horizontal{
+    display: flex;
+    flex-direction: row;
+}
+.vertical{
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+h1 {
+    text-align: center;
+    margin: 20px;
+}
+img{
+    /* width: 50px; */
+    height: 50px;
+    background-size: cover;
+}
+.imgBtn{
+    width: 50px;
+    height: 50px;
+    margin: 5px;
+    background-size: cover;
+    border: none;
+    background-color: rgba(255, 255, 255, 0);
+    cursor: pointer;
+    
+    transition: transform 0.2s ease-in-out;
+}
+.imgBtn:hover{
+    transform: scale(1.2);
+}
+
+
+/***    TOP SECTION    -   LOAD FILE, QUESTION SECTION, RECORD AUDIO  ***/
+#getAudioSection div{
+    display: flex;
+    margin-top: 20px;
+}
+#getAudioSection div:last-child{
+    left: 15%; /* space RECORD */
+}
+
+/*            QUESTION SECTION            */
+#questionBtn{
+    background-image: url("/images/icon_question.png");
+    cursor: help;
+    position: relative;
+}
+#questionBtn:hover{
+    background-image: url('images/icon_questionHover.png');
+}
+#faqPopup{
+    visibility: hidden;
+    position: absolute;
+    top: 0;
+    left: 50px;
+    z-index: 10;
+    border: 2px solid midnightblue;
+    border-radius: 6px;
+    display: inline-block;
+    width: 500px;
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    background-color: white;
+}
+#questionBtn:hover #faqPopup{  /* Displays popup window on-screen */
+    visibility: visible;
+}
+
+#recordBtn{
+    width: 100px;
+    background-image: url("/images/icon_record.png");
+}
+
+#message{
+    width: 80%;
+    margin: 10px auto 40px;
+    padding: 8px 10px;
+    font-size: 16px;
+    border: 1px solid black;
+}
+
+
+/***    TOP SECTION    -   LOAD FILE, RECORD AUDIO  ***/
+#audioOverview {
+    display: inline-block;
+    width: 100%;
+    border: 1px solid black;
+    /* height: 75px; */
+}
+
+
+/***    BOTTOM SECTION    -   CONTROLS (BUTTONS)    ***/
+.drawStyleSelected{
+    border: 2px solid black;
+    border-radius: 12px;
+    box-shadow: 1px 1px 5px black,
+}
+#drawBtn{
+    background-image: url('images/icon_draw.png');
+}
+#eraseBtn{
+    background-image: url('images/icon_erase.png');
+}
+#saveBtn{
+    background-image: url('images/icon_save.png');
+}
+#loadDataBtn{
+    background-image: url('images/icon_loadData.png');
+}
+#clearBtn{
+    background-image: url('images/icon_clear.png');
+}
+/*    ZOOM    */
+#zoomControls{
+    display: flex;
+    align-items: center;
+}
+#zoomOutBtn{
+    width: 30px;
+    height: 30px;
+    background-image: url('images/icon_zoomOut.png');
+}
+#zoomOutBtn:hover{
+    background-image: url('images/icon_zoomOutHover.png');
+}
+#zoomInBtn{
+    width: 30px;
+    height: 30px;
+    background-image: url('images/icon_zoomIn.png');
+}
+#zoomInBtn:hover{
+    background-image: url('images/icon_zoomInHover.png');
+}
+
+
+/***    BOTTOM SECTION    -   AUDIOWAVE SELECTION AREA  ***/
+h3 {
+    margin: 0 2px;
+    text-align: center;
+    width: 85px;
+    color: black;
+    opacity: 100%;
+}
+#mouth h3{
+    position: relative;
+    z-index: 5;
+    text-shadow: 0px 0px 10px rgba(50, 125, 255, 0.5), 0px 0px 20px rgba(50, 125, 255, 0.85);
+}
+#mouthPic, #bodyPic{
+    width: fit-content;
+    margin: 0 auto;
+}
+#headBodyChoice{
+    cursor: pointer;
+}
+#headControlTitle{
+    position: relative;
+    z-index: 5;
+    /* Head control initializes on. */
+    text-shadow: 0px 0px 10px rgba(200, 25, 25, 0.5), 0px 0px 20px rgba(200, 25, 25, 0.85);
+}
+#tailControlTitle{
+    position: relative;
+    z-index: 5;
+    /* text-shadow: 0px 0px 10px rgba(25, 200, 25, 0.5), 0px 0px 20px rgba(25, 200, 25, 0.85); */
+}
+
+
+/***    BOTTOM SECTION    -   AUDIOWAVE EDITING  ***/
+#mouthControl {
+    display: inline-block;
+    width: 100%;
+    border: 1px solid black;
+}
+#mouthControl ::part(scroll){
+  -ms-overflow-style: none;  /* Internet Explorer and Edge */
+  scrollbar-width: none;     /* Firefox */
+}
+/* For Chrome, Safari, Opera, and other WebKit-based browsers */
+#mouthControl ::part(scroll)::-webkit-scrollbar {
+  display: none;
+}
+
+#bodyControl {
+    display: inline-block;
+    width: 100%;
+    border: 1px solid black;
+}
+/*       ScrollBar 1        */
+#bodyControl ::part(scroll)::-webkit-scrollbar {
+    width: 16px;
+}
+#bodyControl ::part(scroll)::-webkit-scrollbar-track {
+    border-radius: 8px;
+    background-color: #e7e7e7;
+    border: 1px solid #cacaca;
+}
+#bodyControl ::part(scroll)::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    background-color: #363636;
+}
+
+
+
+/***        --- OVERRIDES  ---      ***/
+.inactive{
+    opacity: 40%;
+    text-shadow: none;
+}
+.hidden{
+    display: none;
+}

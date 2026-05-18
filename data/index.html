@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" 
+            content="width=device-width, initial-scale=1.0">
+        <title>Audio Player - Loading Audio Buffer</title>
+        <link rel="shortcut icon" href="#">
+        <link  rel="stylesheet" href="./style.css">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    </head>
+
+    <body>
+        <h1> It's Big Mouth Billy Bass Time!!!</h1>
+        <section id="getAudioSection" class="flexStyle">
+            <div>
+                <input type="file" id="fileInput" accept="audio/*" hidden>
+                <label for="fileInput">
+                    <img class="imgBtn" src="/images/icon_load.png">
+                </label>
+            </div>
+
+            <div id="questionBtn" class="imgBtn">
+                <div id="faqPopup">
+                    <!-- <span><b>Instructions</b></span><br>
+                    <span>Load/record audio.</span><br> -->
+                    <span>Use the Draw and Erase tools to add/remove segments to control the fishes movement.</span><br>
+                    <span>Click on the "Head Tail" title or the image below the title to swap between the fishes head and tail.</span><br>
+                    <span> * The head and tail are controlled by the same motor, so the fish can only move (outward) one of those body parts at a time.</span><br>
+                    <span>The downward slope seen after each movement shows the amount of time until the springs return said body part to its original location.</span><br>
+                    <!-- <span></span><br> -->
+                </div>
+            </div>
+
+            <div>
+                <button id="recordBtn" class="imgBtn"></button>
+                <button id="pause" style="display: none;">Pause</button>
+
+                <select id="mic-select" class="hidden">
+                    <option value="" hidden>Select mic</option>
+                </select>
+            </div>
+        </section>
+        <section>
+            <p id="message">Begin by loading or recording some audio.</p>
+        </section>
+        
+        <!--    Audio waveform display   -->
+        <section>
+            <div id="audioOverview"></div>
+        </section>
+
+        <section class="flexStyle">
+            <div style="margin: 1em 0 2em;">
+                <button id="backward">Backward 5s</button>
+                <button id="play">Play/Pause</button>
+                <button id="forward">Forward 5s</button>
+            </div>
+        </section>
+
+        <!-- <section class="flexStyle">
+            <div id="questionBtn" class="imgBtn">
+                <div id="faqPopup">
+                    <span>Use the Draw and Erase tools to add/remove segments to control the fishes movement.</span><br>
+                    <span>Click on the "Head Tail" title or the image below the title to swap between the fishes head and tail.</span><br>
+                    <span> * The head and tail are controlled by the same motor, so the fish can only move (outward) one of those body parts at a time.</span><br>
+                    <span>The downward slope seen after each movement shows the amount of time until the springs return said body part to its original location.</span><br>
+                </div>
+            </div>
+        </section> -->
+
+        <section class="flexStyle">
+            <button id="drawBtn" class="imgBtn drawStyleSelected"></button>
+            <button id="eraseBtn" class="imgBtn"></button>
+            <!-- <img id="undo" src="/images/icon_erase.png"/>
+            <img id="redo" src="/images/icon_erase.png"/> -->
+            <div id="zoomControls">
+                <button id="zoomOutBtn" class="imgBtn"></button>
+                <input type="range" min="100" max="10000" value="100" id="zoomSlider">
+                <button id="zoomInBtn" class="imgBtn"></button>
+            </div>
+            <button id="saveBtn" class="imgBtn"></button>
+            <button id="loadDataBtn" class="imgBtn">Load Data</button>
+                <!-- <input type="file" id="fishFileInput" style="display: none;" accept=".zip,.fish"> -->
+            <button id="clearBtn" class="imgBtn"></button>
+        </section>
+
+        <section>
+            <div id="mouth" class="horizontal">
+                <div class="vertical">
+                    <h3>Mouth</h3>
+                    <img id="mouthPic" src="/images/clipart_mouth.png" />
+                </div>
+                <div id="mouthControl"></div>
+            </div>
+        </section>
+        
+        <section>
+            <div id="body" class="horizontal">
+                <div id="headBodyChoice" class="vertical">
+                    <h3><span id="headControlTitle">Head</span> <!--Add class="active" to head by default?--><span id="tailControlTitle" class="inactive">Tail</span></h3>
+                    <img id="headPic" src="/images/clipart_head.png" />
+                    <img id="tailPic" src="/images/clipart_tail.png" class="hidden" />
+                </div>
+                <div id="bodyControl"></div>
+            </div>
+        </section>
+
+        <section class="flexStyle">
+            <div class="horizontal">
+                <button id="sendBtn">Give to the fish.</button>
+            </div>
+        </section>
+
+
+
+        <script type="module" src="./main.js"></script>
+
+    </body>
+</html>
+
+<!-- 
+In Terminal: 
+    python3 -m http.server 8000
+
+URL to use in web browser:
+    localhost:8000
+-->
