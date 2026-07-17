@@ -529,33 +529,36 @@ function loadedData(motorData, audio){
 
 
 /////               SEND DATA TO FISH              /////
-sendBtn.addEventListener("click", async () => { // send via bluetooth
-  const audioBuffer = await getAudioBlob(audioBlob);
-    console.log("Audio size:", audioBuffer.byteLength, "bytes");
-    const allEvents = compileEvents(); // Stores all motor movement data in array
-    // console.log(allEvents);
-    // console.log("Events:", allEvents.length);
-    const packet = buildPacket(allEvents, audioBuffer);
-    console.log("Total packet size:", packet.byteLength, "bytes");
-  const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [0xBA55] }],
-      optionalServices: ['b160ba55-aaaa-0117-3650-005006019920']
-  });
-  const server = await device.gatt.connect();
-  // Force the MTU request and actually wait for it
-  try {
-      if (device.gatt.requestMTU) {
-          await device.gatt.requestMTU(512);
-          console.log("MTU set to 512");
-      }
-  } catch(e) {
-      console.log("MTU request failed, continuing with default", e);
-  }
-  // const service = await server.getPrimaryService(0xBA55);
-  const service = await server.getPrimaryService('b160ba55-aaaa-0117-3650-005006019920');
-  const characteristic = await service.getCharacteristic('0abc1230-0021-0021-0021-333444455555');
-  await sendBinary(packet, characteristic);
-})
+// sendBtn.addEventListener("click", async () => { // send via bluetooth
+//   const audioBuffer = await getAudioBlob(audioBlob);
+//   console.log("Audio size:", audioBuffer.byteLength, "bytes");
+//   const allEvents = compileEvents(); // Stores all motor movement data in array
+//   // console.log(allEvents);
+//   // console.log("Events:", allEvents.length);
+//   const packet = buildPacket(allEvents, audioBuffer);
+//   console.log("Total packet size:", packet.byteLength, "bytes");
+//   /////////////////////////////////BLUETOOTH STUFF////////UNUSED?///////////////////////////
+//     const device = await navigator.bluetooth.requestDevice({//////////////////////
+//         filters: [{ services: [0xBA55] }],
+//         optionalServices: ['b160ba55-aaaa-0117-3650-005006019920']
+//     });
+//     const server = await device.gatt.connect();
+//     // Force the MTU request and actually wait for it
+//     try {
+//         if (device.gatt.requestMTU) {
+//             await device.gatt.requestMTU(512);
+//             console.log("MTU set to 512");
+//         }
+//     } catch(e) {
+//         console.log("MTU request failed, continuing with default", e);
+//     }
+//   /////////////////////END BLUETOOTH THING/////////////////////////
+
+//   // const service = await server.getPrimaryService(0xBA55);
+//   const service = await server.getPrimaryService('b160ba55-aaaa-0117-3650-005006019920');
+//   const characteristic = await service.getCharacteristic('0abc1230-0021-0021-0021-333444455555');
+//   await sendBinary(packet, characteristic);
+// })
 function compileEvents(){
   const events = []
   regions_mouth.regions.forEach(region => {
@@ -629,7 +632,12 @@ async function getAudioBlob(file) {
     
     // Decodes MP3, WAV, M4A, OGG — anything the browser supports
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    
+    ///////////////////
+    console.log("decoded sampleRate:", audioBuffer.sampleRate);
+    console.log("decoded length (samples):", audioBuffer.length);
+    console.log("decoded channels:", audioBuffer.numberOfChannels);
+    console.log("duration (s):", audioBuffer.duration);
+    ///////////////////
     // Mix down to mono (Billy Bass only has one speaker)
     const numChannels = audioBuffer.numberOfChannels;
     const length = audioBuffer.length;
