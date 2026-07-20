@@ -11,10 +11,16 @@ import Record from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/record.esm.js
 
 
 /////         Store UI Elements         /////
+const newContentBtn = document.getElementById('newContentBtn')
+const oldContentBtn = document.getElementById('oldContentBtn')
+const newContentPage = document.getElementById('newContentPage')
+const oldContentPage = document.getElementById('oldContentPage')
+
 const fileInput = document.getElementById('fileInput')
 const recordBtn = document.getElementById('recordBtn')
 
 const questionBtn = document.getElementById('question')
+const message = document.getElementById('message')
 
 const zoomInBtn = document.getElementById('zoomInBtn')
 const zoomOutBtn = document.getElementById('zoomOutBtn')
@@ -22,6 +28,7 @@ const zoomSlider = document.getElementById('zoomSlider')
 
 const drawBtn = document.getElementById('drawBtn')
 const eraseBtn = document.getElementById('eraseBtn')
+const saveNameInput = document.getElementById('saveNameInput')
 const saveBtn = document.getElementById('saveBtn')
 const loadDataBtn = document.getElementById('loadDataBtn')
 // const fishFileInput = document.getElementById('fishFileInput');
@@ -81,6 +88,15 @@ drawBtn.addEventListener("click", setEditMode)
 eraseBtn.addEventListener("click", setEditMode)
 headBodyChoice.addEventListener("click", swapBodyMode)
 
+function displayMessage(newMessage, color, replace){
+  if (replace){
+    message.textContent = newMessage;
+  } else {
+    oldText = message.textContent;
+    message.textContent = oldText + newMessage;
+  }
+  message.style.color = color;
+}
 
 /////         SETUP AUDIO WAVEFORM STUFF          /////
 function initializeWaveSurfers(){
@@ -279,10 +295,9 @@ function initializeWaveSurfers(){
   fileInput.addEventListener('change', function(e){ // file input: when a file is selected, load it into the master
     const file = this.files && this.files[0]
     if (!file) return
-
+    
     // resetPage() // Clear all waveforms/regions
     
-    // loadFile(file);
     const reader = new FileReader()
     reader.onload = (evt) => {
     const blob = new Blob([new Uint8Array(evt.target.result)])
@@ -302,7 +317,8 @@ function initializeWaveSurfers(){
         await recordPlugin.startRecording()
       }
     } catch (err) {
-      console.error('record error', err)
+      displayMessage(`record error ${err}`, true)
+      // console.error('record error', err)
     }
   })
 
@@ -355,16 +371,44 @@ function setEditMode(source){
     editMode = "draw"
     drawBtn.classList.add("drawStyleSelected")
     eraseBtn.classList.remove("drawStyleSelected")
+    displayMessage("drawring", green, false); ////////////////////// *** //////////////////////////////////
   } else {
+    displayMessage("erasering", red, true); ////////////////////// *** //////////////////////////////////
     editMode = "erase"
     drawBtn.classList.remove("drawStyleSelected")
     eraseBtn.classList.add("drawStyleSelected")
   }
 }
 
+/////         CHANGING PAGES, TOP BUTTONS         /////
+newContentBtn.addEventListener("click", () => {
+  newContentPage.classList.remove("hidden");
+  oldContentPage.classList.add("hidden");
+
+  // *** MAKE TO ONLY USE ONE CLASS FOR ACTIVE/INACTIVE *** //
+  newContentBtn.classList.add("active")
+  newContentBtn.classList.remove("inactive")
+  oldContentBtn.classList.add("inactive")
+  oldContentBtn.classList.remove("active")
+})
+oldContentBtn.addEventListener("click", () => {
+  newContentPage.classList.add("hidden");
+  oldContentPage.classList.remove("hidden");
+
+  // *** MAKE TO ONLY USE ONE CLASS FOR ACTIVE/INACTIVE *** //
+  newContentBtn.classList.add("inactive")
+  newContentBtn.classList.remove("active")
+  oldContentBtn.classList.add("active")
+  oldContentBtn.classList.remove("inactive")
+})
 
 /////               SAVE/LOAD --> MUSIC + MOTOR DATA              /////
 saveBtn.addEventListener("click", async() => {
+  name = saveNameInput.value;
+  if (name == ""){
+    displayMessage("Filename Required!", red, true);
+    return;
+  }
   const zip = new JSZip();
   
   // Add the JSON data as a string
@@ -381,7 +425,7 @@ saveBtn.addEventListener("click", async() => {
   // Trigger automatic download
   const link = document.createElement("a");
   link.href = URL.createObjectURL(content);
-  link.download = "my_fish_dance.fish"; //  *** Change name to use original audio file
+  link.download = `${name}.fish`; //  *** CONFIRM THIS WORKS !?!?!?
   link.click();
 })
 
@@ -402,7 +446,6 @@ loadDataBtn.addEventListener("click", () => {
       const audioFileName = Object.keys(zip.files).find(name => name.startsWith("audio."));
       const audioFile = audioFileName ? zip.file(audioFileName) : null;
 
-      console.log(zip)
       // Check if the file exists in the zip before trying to read it
       if (!dataFile || !audioFile) {
         alert("Error: This doesn't look like a valid Billy Bass project file!");
@@ -410,18 +453,18 @@ loadDataBtn.addEventListener("click", () => {
       }
       
       resetPage() // Clear all waveforms/regions
-  
+      
       // Extract motor data and audio file
       const motorData = JSON.parse(await dataFile.async("text"));
       const extractedAudioBlob = await audioFile.async("blob");
       
       loadAudioBlob(extractedAudioBlob); // Use existing function for waveform + global variable update!
       loadedData(motorData); // Update the timeline/motor data
-      // loadFile(audioUrl)
       // console.log(motorData)
   
     } catch (err) {
-      console.error("Failed to load zip:", err);
+      displayMessage(`Failed to load zip: ${err}`, true);
+      // console.error("Failed to load zip:", err);
       alert("Something went wrong reading the file.");
     }
   })
@@ -429,52 +472,6 @@ loadDataBtn.addEventListener("click", () => {
   fishFileInput.click(); // Needed to trigger the above addEventListener
 })
 
-// loadDataBtn.addEventListener("click", () => {
-//   resetPage();
-//   fishFileInput.click();
-// });
-// fishFileInput.addEventListener("change", async(e) => {
-//   const file = e.target.files[0];
-//   if (!file) return;
-
-//   try {
-//     const zip = await JSZip.loadAsync(file);
-
-//     // Check if the file exists in the zip before trying to read it
-//     const dataFile = zip.file("motor-data.json");
-//     // const audioFile = zip.file("audio.bin");
-//     const audioFileName = Object.keys(zip.files).find(name => name.startsWith("audio."));
-//     const audioFile = audioFileName ? zip.file(audioFileName) : null;
-//     console.log(zip)
-//     if (!dataFile || !audioFile) {
-//       alert("Error: This doesn't look like a valid Billy Bass project file!");
-//       return;
-//     }
-
-//     // 1. Extract motor data and audio file
-//     const motorData = JSON.parse(await dataFile.async("text"));
-//     const extractedAudioBlob = await audioFile.async("blob");
-
-//     // Use your existing function so the waveform and global variable update!
-//     loadAudioBlob(extractedAudioBlob); 
-    
-//     // Update your timeline/motor data variable
-//     // (Assuming you have a global variable for this)
-//     loadedData(motorData);
-
-//     console.log("Project Loaded Successfully!", motorData);
-//     // loadFile(audioUrl)
-//     // console.log(motorData)
-
-//   } catch (err) {
-//     console.error("Failed to load zip:", err);
-//     alert("Something went wrong reading the file.");
-//   } finally {
-//     // Reset the input so you can load the same file twice if you wanted to
-//     fishFileInput.value = "";
-//   }
-//   // return { motorData, audioUrl };
-// })
 
 function resetPage(){
   audioWave_full.empty();
@@ -529,36 +526,7 @@ function loadedData(motorData, audio){
 
 
 /////               SEND DATA TO FISH              /////
-// sendBtn.addEventListener("click", async () => { // send via bluetooth
-//   const audioBuffer = await getAudioBlob(audioBlob);
-//   console.log("Audio size:", audioBuffer.byteLength, "bytes");
-//   const allEvents = compileEvents(); // Stores all motor movement data in array
-//   // console.log(allEvents);
-//   // console.log("Events:", allEvents.length);
-//   const packet = buildPacket(allEvents, audioBuffer);
-//   console.log("Total packet size:", packet.byteLength, "bytes");
-//   /////////////////////////////////BLUETOOTH STUFF////////UNUSED?///////////////////////////
-//     const device = await navigator.bluetooth.requestDevice({//////////////////////
-//         filters: [{ services: [0xBA55] }],
-//         optionalServices: ['b160ba55-aaaa-0117-3650-005006019920']
-//     });
-//     const server = await device.gatt.connect();
-//     // Force the MTU request and actually wait for it
-//     try {
-//         if (device.gatt.requestMTU) {
-//             await device.gatt.requestMTU(512);
-//             console.log("MTU set to 512");
-//         }
-//     } catch(e) {
-//         console.log("MTU request failed, continuing with default", e);
-//     }
-//   /////////////////////END BLUETOOTH THING/////////////////////////
 
-//   // const service = await server.getPrimaryService(0xBA55);
-//   const service = await server.getPrimaryService('b160ba55-aaaa-0117-3650-005006019920');
-//   const characteristic = await service.getCharacteristic('0abc1230-0021-0021-0021-333444455555');
-//   await sendBinary(packet, characteristic);
-// })
 function compileEvents(){
   const events = []
   regions_mouth.regions.forEach(region => {
@@ -633,10 +601,14 @@ async function getAudioBlob(file) {
     // Decodes MP3, WAV, M4A, OGG — anything the browser supports
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     ///////////////////
-    console.log("decoded sampleRate:", audioBuffer.sampleRate);
-    console.log("decoded length (samples):", audioBuffer.length);
-    console.log("decoded channels:", audioBuffer.numberOfChannels);
-    console.log("duration (s):", audioBuffer.duration);
+    displayMessage(`decoded sampleRate: ${audioBuffer.sampleRate}`, black, false);
+    // console.log("decoded sampleRate:", audioBuffer.sampleRate);
+    displayMessage(`decoded length (samples): ${audioBuffer.length}`, black, false);
+    // console.log("decoded length (samples):", audioBuffer.length);
+    displayMessage(`decoded channels: ${audioBuffer.numberOfChannels}`, black, false);
+    // console.log("decoded channels:", audioBuffer.numberOfChannels);
+    displayMessage(`duration (s): ${audioBuffer.duration}`, black, false);
+    // console.log("duration (s):", audioBuffer.duration);
     ///////////////////
     // Mix down to mono (Billy Bass only has one speaker)
     const numChannels = audioBuffer.numberOfChannels;
@@ -659,23 +631,27 @@ async function getAudioBlob(file) {
         sample = Math.max(-1, Math.min(1, sample));
         pcm[i] = sample < 0 ? sample * 32768 : sample * 32767;
     }
-    console.log("PCM size:", pcm.buffer.byteLength)
+    displayMessage(`PCM size:, ${pcm.buffer.byteLength}`, black, false)
+    // console.log("PCM size:", pcm.buffer.byteLength)
     return pcm.buffer;
 }
 // Each chunk: [type:1][seq:2][total:2][payload:N]
-// --- UPDATED WIFI SEND LOGIC ---
 sendBtn.addEventListener("click", async () => { 
-  console.log("Processing audio and motor data...");
+  displayMessage(`Processing audio and motor data...`, black, false);
+  // console.log("Processing audio and motor data...");
   
   // 1. Build the data
   const audioBuffer = await getAudioBlob(audioBlob); // Ensure audioBlob is available in scope
-  console.log("Audio size:", audioBuffer.byteLength, "bytes");
+  displayMessage(`Audio size: ${audioBuffer.byteLength} bytes`, black, false);
+  // console.log("Audio size:", audioBuffer.byteLength, "bytes");
   
   const allEvents = compileEvents();
-  console.log("Events:", allEvents.length);
+  displayMessage(`Events: ${allEvents.length}`, black, false);
+  // console.log("Events:", allEvents.length);
   
   const packet = buildPacket(allEvents, audioBuffer);
-  console.log("Total packet size:", packet.byteLength, "bytes");
+  displayMessage(`Total packet size: ${packet.byteLength} bytes`, black, false);
+  // console.log("Total packet size:", packet.byteLength, "bytes");
 
   // 2. Package for Web Server upload
   // Convert the raw ArrayBuffer into a Blob so we can send it as a file
@@ -684,12 +660,12 @@ sendBtn.addEventListener("click", async () => {
   formData.append("file", blob, "payload.bin"); 
 
   // 3. Send to ESP32
-  console.log("Uploading to fish via Wi-Fi...");
+  displayMessage(`Uploading to fish via Wi-Fi...`, black, false);
+  // console.log("Uploading to fish via Wi-Fi...");
   const startTime = Date.now();
 
   try {
-    // Because the HTML/JS is hosted on the ESP32 itself, 
-    // we can just use the relative path '/upload'
+    // Because the HTML/JS is hosted on the ESP32 itself --> use the relative path "/upload"
     const response = await fetch('http://billybass.local/upload', {
       method: 'POST',
       body: formData
@@ -697,11 +673,14 @@ sendBtn.addEventListener("click", async () => {
 
     if (response.ok) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`Upload complete in ${elapsed}s! Music should start automatically.`);
+      displayMessage(`Upload complete in ${elapsed}s! Music should start automatically.`, black, false);
+      // console.log(`Upload complete in ${elapsed}s! Music should start automatically.`);
     } else {
-      console.error("Upload failed. ESP32 returned status:", response.status);
+      displayMessage(`Upload failed. ESP32 returned status: ${response.status}`, red, true);
+      // console.error("Upload failed. ESP32 returned status:", response.status);
     }
   } catch (e) {
-    console.error("Network error during upload:", e);
+    displayMessage(`Network error during upload: ${e}`, red, true);
+    // console.error("Network error during upload:", e);
   }
 });
